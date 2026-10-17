@@ -1,0 +1,32 @@
+# Build output
+target/
+*.jar
+!**/src/**/*.jar
+
+# Local secrets, never commit
+.env
+*.env.local
+**/src/main/resources/config/secure-local.yaml
+infrastructure/.env
+
+# Generated reports and logs
+logs/
+*.log
+newman/
+.mule/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+.DS_Store
+Thumbs.db
+
+# Anypoint Studio / Code Builder
+.studio/
+.tooling-project/
+.tmp/
