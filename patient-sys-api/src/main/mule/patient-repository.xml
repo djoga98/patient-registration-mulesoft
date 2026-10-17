@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!--
+      All SQL of the application. Statements are static text with named parameters;
+      values are always bound, never concatenated.
+    -->
+
+    <sub-flow name="insert-patient"
+              doc:name="insert-patient"
+              doc:description="Inserts a patient record and reads it back as stored">
+        <!-- uq_patient_identity arbitrates duplicates atomically: a conflicting row is not
+             inserted (affectedRows = 0) instead of failing with a driver-specific exception. -->
+        <db:insert config-ref="database-config"
+                   autoGenerateKeys="true"
+                   queryTimeout="${db.queryTimeoutSeconds}"
+                   queryTimeoutUnit="SECONDS"
+                   doc:name="Insert patient"
+                   doc:description="Inserts the record unless the identity (name + birth date) already exists">
+            <db:sql><![CDATA[
+INSERT INTO patient (given_name, family_name, birth_date, sex, category, email, phone,
+                     consent_data_processing, consent_sms, source)
+VALUES (:given_name, :family_name, CAST(:birth_date AS DATE), :sex, :category, :email,
+        CAST(:phone AS VARCHAR), :consent_data_processing, :consent_sms, :source)
+ON CONFLICT ON CONSTRAINT uq_patient_identity DO NOTHING
+]]></db:sql>
+            <db:input-parameters><![CDATA[#[%dw 2.0
+import toInsertParameters from dwl::PatientRecords
+---
+toInsertParameters(payload)]]]></db:input-parameters>
+        </db:insert>
+        <choice doc:name="Inserted?"
+                doc:description="Detects a record rejected by the unique identity constraint">
+            <when expression="#[payload.affectedRows == 0]"
+                  doc:name="Duplicate identity"
+                  doc:description="No row was inserted because the identity already exists">
+                <raise-error type="APP:DUPLICATE_PATIENT"
+                             description="uq_patient_identity rejected the record"
+                             doc:name="Raise DUPLICATE_PATIENT"
+                             doc:description="Signals a duplicate patient (409)"/>
+            </when>
+        </choice>
+        <set-variable variableName="patientId" value="#[payload.generatedKeys.patient_id]"
+                      doc:name="Generated patient ID"
+                      doc:description="Keeps the database-generated PAT- identifier"/>
+        <logger level="INFO" category="com.acme.patient.sys"
+                message="#['Patient stored patientId=$(vars.patientId)']"
+                doc:name="Log patient stored"
+                doc:description="Logs the generated patient ID (no patient data)"/>
+        <flow-ref name="find-patient-by-id"
+                  doc:name="Read back stored patient"
+                  doc:description="Returns the record exactly as stored, with generated status and timestamp"/>
+    </sub-flow>
+
+    <sub-flow name="find-patient-by-id"
+              doc:name="find-patient-by-id"
+              doc:description="Selects one patient by vars.patientId and maps it to the record contract">
+        <db:select config-ref="database-config"
+                   queryTimeout="${db.queryTimeoutSeconds}"
+                   queryTimeoutUnit="SECONDS"
+                   doc:name="Select patient"
+                   doc:description="Selects the patient row; dates are formatted in SQL to avoid JVM time-zone shifts">
+            <db:sql><![CDATA[
+SELECT patient_id,
+       given_name,
+       family_name,
+       to_char(birth_date, 'YYYY-MM-DD') AS birth_date,
+       sex,
+       category,
+       email,
+       phone,
+       consent_data_processing,
+       consent_sms,
+       source,
+       status,
+       CAST(floor(extract(EPOCH FROM registered_at)) AS BIGINT) AS registered_epoch
+  FROM patient
+ WHERE patient_id = :patient_id
+]]></db:sql>
+            <db:input-parameters><![CDATA[#[{ patient_id: vars.patientId }]]]></db:input-parameters>
+        </db:select>
+        <choice doc:name="Found?"
+                doc:description="Distinguishes an unknown patient ID">
+            <when expression="#[isEmpty(payload)]"
+                  doc:name="No row"
+                  doc:description="No patient has this ID">
+                <raise-error type="APP:PATIENT_NOT_FOUND"
+                             description="No patient row for the requested ID"
+                             doc:name="Raise PATIENT_NOT_FOUND"
+                             doc:description="Signals an unknown patient (404)"/>
+            </when>
+        </choice>
+        <ee:transform doc:name="Row to record"
+                      doc:description="Maps the selected row to the snake_case record contract">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+import fromRow from dwl::PatientRecords
+output application/json
+---
+fromRow(payload[0])]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </sub-flow>
+</mule>

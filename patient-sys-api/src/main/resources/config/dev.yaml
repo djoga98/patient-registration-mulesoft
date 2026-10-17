@@ -1,0 +1,8 @@
+# CloudHub 2.0 "dev" environment. CloudHub routes HTTPS ingress to port 8081.
+#
+# db.url is supplied at deployment (GitHub variable DB_URL -> deployment property),
+# because it depends on the hosted database. Example:
+#   jdbc:postgresql://<host>:5432/<database>?sslmode=require&connectTimeout=5&socketTimeout=30
+# Credentials come from config/secure-dev.yaml (ciphertext only).
+http:
+  port: "8081"

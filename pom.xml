@@ -17,5 +17,6 @@
     <name>Patient Registration APIs (aggregator)</name>
 
     <modules>
+        <module>patient-sys-api</module>
     </modules>
 </project>

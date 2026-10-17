@@ -1,0 +1,6 @@
+# MUnit only. Every database operation is mocked; this URL is never contacted.
+http:
+  port: "18083"
+
+db:
+  url: "jdbc:postgresql://localhost:1/munit-never-connects"

@@ -1,0 +1,8 @@
+# Local development: Docker PostgreSQL from infrastructure/docker-compose.yml.
+# Credentials come from config/secure-local.yaml (generated, git-ignored).
+http:
+  port: "8083"
+
+db:
+  # connectTimeout / socketTimeout are pgjdbc settings, in seconds.
+  url: "jdbc:postgresql://localhost:5432/patients?connectTimeout=5&socketTimeout=30&ApplicationName=patient-sys-api"

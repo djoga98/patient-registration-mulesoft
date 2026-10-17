@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MUnit: same pattern as the application, written to the console. -->
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} %-5p [correlationId=%X{correlationId}] %c: %m%n"/>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <AsyncLogger name="org.mule.service.http" level="WARN"/>
+        <AsyncLogger name="org.mule.extension.http" level="WARN"/>
+        <AsyncLogger name="org.mule.extension.db" level="WARN"/>
+        <AsyncLogger name="com.acme.patient" level="INFO"/>
+        <AsyncRoot level="WARN">
+            <AppenderRef ref="console"/>
+        </AsyncRoot>
+    </Loggers>
+</Configuration>

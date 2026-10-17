@@ -1,0 +1,13 @@
+# Settings shared by every environment. Environment files must not repeat these keys.
+http:
+  host: "0.0.0.0"
+
+api:
+  basePath: "/api/*"
+
+db:
+  driverClassName: "org.postgresql.Driver"
+  queryTimeoutSeconds: "10"
+  pool:
+    maxSize: "5"
+    maxWaitMillis: "5000"

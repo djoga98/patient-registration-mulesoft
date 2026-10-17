@@ -1,0 +1,12 @@
+{
+  "given_name": "Ana",
+  "family_name": "Kovač",
+  "birth_date": "1985-04-12",
+  "sex": "F",
+  "category": "ADULT",
+  "email": "ana.kovac@example.com",
+  "phone": "+38761111222",
+  "consent_data_processing": true,
+  "consent_sms": false,
+  "source": "PORTAL"
+}

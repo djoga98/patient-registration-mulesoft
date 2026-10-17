@@ -1,0 +1,4 @@
+# MUnit only. Plain placeholders, no ciphertext: database operations are mocked.
+db:
+  user: "munit"
+  password: "munit"

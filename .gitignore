@@ -30,3 +30,6 @@ Thumbs.db
 .studio/
 .tooling-project/
 .tmp/
+
+# Local Mule runtime base used by scripts/run-mule-local.sh
+.mule-base/

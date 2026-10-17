@@ -1,0 +1,83 @@
+#%RAML 1.0
+title: Patient System API
+description: |
+  System API over the clinic's patient record store. The only API that touches
+  the database. Speaks the database record format (snake_case), generates the
+  patient ID and applies no business rules.
+version: v1
+mediaType: application/json
+protocols: [ HTTP, HTTPS ]
+
+traits:
+  correlated: !include traits/correlated.raml
+
+uses:
+  rec: types/patient-record-types.raml
+
+/patients:
+  post:
+    displayName: Store a patient record
+    is: [ correlated ]
+    body:
+      application/json:
+        type: rec.PatientRecordInput
+        example: !include examples/patient-record-input.json
+    responses:
+      201:
+        headers:
+          Location:
+            type: string
+            example: /api/patients/PAT-000123
+        body:
+          application/json:
+            type: rec.PatientRecord
+            example: !include examples/patient-record.json
+      400:
+        body:
+          application/json:
+            type: rec.ErrorResponse
+      409:
+        description: A record with the same given name, family name and birth date exists.
+        body:
+          application/json:
+            type: rec.ErrorResponse
+            example: !include examples/error-duplicate.json
+      500:
+        body:
+          application/json:
+            type: rec.ErrorResponse
+      502:
+        description: The database is unreachable.
+        body:
+          application/json:
+            type: rec.ErrorResponse
+
+  /{patientId}:
+    uriParameters:
+      patientId: rec.PatientId
+    get:
+      displayName: Read a patient record
+      is: [ correlated ]
+      responses:
+        200:
+          body:
+            application/json:
+              type: rec.PatientRecord
+              example: !include examples/patient-record.json
+        400:
+          body:
+            application/json:
+              type: rec.ErrorResponse
+        404:
+          body:
+            application/json:
+              type: rec.ErrorResponse
+              example: !include examples/error-not-found.json
+        500:
+          body:
+            application/json:
+              type: rec.ErrorResponse
+        502:
+          body:
+            application/json:
+              type: rec.ErrorResponse

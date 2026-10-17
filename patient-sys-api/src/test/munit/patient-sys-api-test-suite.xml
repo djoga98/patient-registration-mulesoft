@@ -1,0 +1,448 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!--
+      API-level tests: requests go through the real HTTP listener and APIkit router, so
+      validation, routing, status codes, headers and the error handler are all exercised.
+      Every database operation is mocked; no database is contacted.
+    -->
+    <munit:config name="patient-sys-api-test-suite.xml"/>
+
+    <http:request-config name="test-http-client">
+        <http:request-connection host="localhost" port="${http.port}"/>
+    </http:request-config>
+
+    <!-- Sends payload to the API. Inputs: vars.method, vars.path, vars.requestHeaders. -->
+    <sub-flow name="call-sys-api">
+        <http:request config-ref="test-http-client" method="#[vars.method]" path="#[vars.path]">
+            <http:headers><![CDATA[#[vars.requestHeaders default {}]]]></http:headers>
+            <http:response-validator>
+                <http:success-status-code-validator values="100..599"/>
+            </http:response-validator>
+        </http:request>
+    </sub-flow>
+
+    <!-- ===================================================== POST /api/patients -->
+
+    <munit:test name="post-valid-record-returns-201-with-stored-record"
+                description="A valid record is inserted, read back and returned with generated fields, Location and correlation headers">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="db:insert">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1, generatedKeys: { patient_id: 'PAT-000123' } }]" mediaType="application/java"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[ readUrl('classpath://samples/patient-row.json', 'application/json') ]]" mediaType="application/java"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[output application/json --- readUrl('classpath://samples/record-input.json', 'application/json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json', 'X-Correlation-ID': 'sys-post-001' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[201]" message="Status must be 201"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'x-correlation-id']" expected="#['sys-post-001']" message="Correlation ID must be echoed"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.location]" expected="#['/api/patients/PAT-000123']" message="Location must point at the new patient"/>
+            <!-- orderBy $$: compare objects independently of key order -->
+            <munit-tools:assert-equals actual="#[payload orderBy $$]"
+                                       expected="#[(readUrl('classpath://samples/record-input.json', 'application/json') ++ { patient_id: 'PAT-000123', status: 'ACTIVE', registered_at: '2026-10-15T10:21:07Z' }) orderBy $$]"
+                                       message="Body must be the stored record with generated fields"/>
+            <munit-tools:verify-call processor="db:insert" times="1"/>
+            <munit-tools:verify-call processor="db:select" times="1"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-record-without-phone-returns-record-without-phone-field"
+                description="A NULL phone column is omitted from the response instead of being returned as null">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="db:insert">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1, generatedKeys: { patient_id: 'PAT-000124' } }]" mediaType="application/java"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[ (readUrl('classpath://samples/patient-row.json', 'application/json') -- ['patient_id', 'phone']) ++ { patient_id: 'PAT-000124', phone: null } ]]" mediaType="application/java"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[output application/json --- readUrl('classpath://samples/record-input.json', 'application/json') - 'phone']" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[201]"/>
+            <munit-tools:assert-equals actual="#[payload.patient_id]" expected="#['PAT-000124']"/>
+            <munit-tools:assert-equals actual="#[payload.phone?]" expected="#[false]" message="phone must be absent, not null"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-duplicate-identity-returns-409"
+                description="When the unique identity constraint prevents the insert, the API answers 409 DUPLICATE_PATIENT and does not read back">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="db:insert">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 0, generatedKeys: {} }]" mediaType="application/java"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[output application/json --- readUrl('classpath://samples/record-input.json', 'application/json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json', 'X-Correlation-ID': 'sys-dup-001' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[409]"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'x-correlation-id']" expected="#['sys-dup-001']"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['DUPLICATE_PATIENT']"/>
+            <munit-tools:assert-equals actual="#[payload.error.message]" expected="#['A patient with the same name and date of birth already exists.']"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#['sys-dup-001']"/>
+            <munit-tools:assert-that expression="#[payload.error.timestamp]" is="#[MunitTools::matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$')]"/>
+            <munit-tools:verify-call processor="db:select" times="0"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-missing-required-field-returns-400"
+                description="APIkit rejects a record without sex before any database access">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="#[output application/json --- readUrl('classpath://samples/record-input.json', 'application/json') - 'sex']" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json', 'X-Correlation-ID': 'sys-400-001' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[400]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['BAD_REQUEST']"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#['sys-400-001']"/>
+            <munit-tools:verify-call processor="db:insert" times="0"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-invalid-enum-value-returns-400"
+                description="A sex code outside F/M/O is rejected by the spec">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="#[output application/json --- (readUrl('classpath://samples/record-input.json', 'application/json') - 'sex') ++ { sex: 'X' }]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[400]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['BAD_REQUEST']"/>
+            <munit-tools:verify-call processor="db:insert" times="0"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-unsupported-media-type-returns-415"
+                description="A non-JSON body is rejected with 415 and the standard error body">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="given_name=Ana" mimeType="text/plain"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'text/plain' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[415]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['UNSUPPORTED_MEDIA_TYPE']"/>
+            <munit-tools:verify-call processor="db:insert" times="0"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-query-failure-returns-500-without-internals"
+                description="An unexpected SQL failure becomes 500 INTERNAL_ERROR with no SQL or driver text in the body">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="db:insert">
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="DB:QUERY_EXECUTION"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[output application/json --- readUrl('classpath://samples/record-input.json', 'application/json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json', 'X-Correlation-ID': 'sys-500-001' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[500]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['INTERNAL_ERROR']"/>
+            <munit-tools:assert-equals actual="#[payload.error.message]" expected="#['An unexpected error occurred.']"/>
+            <munit-tools:assert-equals actual="#[keysOf(payload.error) map ($ as String)]" expected="#[['code', 'message', 'correlationId', 'timestamp']]"
+                                       message="Error body must contain exactly the four standard fields"/>
+            <munit-tools:verify-call processor="db:select" times="0"/>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ========================================== GET /api/patients/{patientId} -->
+
+    <munit:test name="get-existing-patient-returns-200"
+                description="A stored patient is returned in the record format">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="db:select">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[ readUrl('classpath://samples/patient-row.json', 'application/json') ]]" mediaType="application/java"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'X-Correlation-ID': 'sys-get-001' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[200]"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'x-correlation-id']" expected="#['sys-get-001']"/>
+            <munit-tools:assert-equals actual="#[payload.patient_id]" expected="#['PAT-000123']"/>
+            <munit-tools:assert-equals actual="#[payload.family_name]" expected="#['Kovač']" message="Unicode must survive the round trip"/>
+            <munit-tools:assert-equals actual="#[payload.registered_at]" expected="#['2026-10-15T10:21:07Z']"/>
+            <munit-tools:assert-equals actual="#[payload.registered_epoch?]" expected="#[false]" message="Internal column must not leak"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="get-unknown-patient-returns-404"
+                description="An ID without a row answers 404 PATIENT_NOT_FOUND">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="db:select">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-999999"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'X-Correlation-ID': 'sys-404-001' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[404]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['PATIENT_NOT_FOUND']"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#['sys-404-001']"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="get-malformed-patient-id-returns-400"
+                description="A patient ID that does not match PAT-###### is rejected before querying">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/12345"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[400]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['BAD_REQUEST']"/>
+            <munit-tools:verify-call processor="db:select" times="0"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="get-database-unreachable-returns-502"
+                description="A database connectivity failure answers 502 DOWNSTREAM_ERROR">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="db:select">
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="DB:CONNECTIVITY"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'X-Correlation-ID': 'sys-502-001' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[502]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['DOWNSTREAM_ERROR']"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#['sys-502-001']"/>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ===================================================== protocol / routing -->
+
+    <munit:test name="unknown-resource-returns-404-resource-not-found"
+                description="Paths outside the spec answer 404 with the standard body">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/doctors"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[404]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['RESOURCE_NOT_FOUND']"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="unsupported-method-returns-405"
+                description="DELETE is not part of the contract">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="DELETE"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[405]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['METHOD_NOT_ALLOWED']"/>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ========================================================== correlation ID -->
+
+    <munit:test name="incoming-correlation-id-is-the-event-correlation-id"
+                description="The X-Correlation-ID header becomes both vars.correlationId and the runtime correlation ID used in every log line">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:spy processor="db:select">
+                <munit-tools:before-call>
+                    <munit-tools:assert-equals actual="#[vars.correlationId]" expected="#['sys-cid-777']"/>
+                    <munit-tools:assert-equals actual="#[correlationId]" expected="#['sys-cid-777']"
+                                               message="Logged correlation ID (MDC) must equal the propagated value"/>
+                </munit-tools:before-call>
+            </munit-tools:spy>
+            <munit-tools:mock-when processor="db:select">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[ readUrl('classpath://samples/patient-row.json', 'application/json') ]]" mediaType="application/java"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'X-Correlation-ID': 'sys-cid-777' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[200]"/>
+            <munit-tools:verify-call processor="db:select" times="1"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="missing-correlation-id-is-generated-as-uuid"
+                description="Without X-Correlation-ID the API generates a UUID and uses it in the header and error body">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-sys-api-config"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="db:select">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000001"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[404]"/>
+            <munit-tools:assert-that expression="#[attributes.headers.'x-correlation-id']"
+                                     is="#[MunitTools::matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\$')]"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#[attributes.headers.'x-correlation-id']"/>
+        </munit:validation>
+    </munit:test>
+</mule>

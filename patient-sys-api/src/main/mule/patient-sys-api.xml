@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+
+    <flow name="patient-sys-api-main"
+          doc:name="patient-sys-api-main"
+          doc:description="Receives /api/* requests, validates them against the RAML and routes them to an operation flow">
+        <http:listener config-ref="http-listener-config" path="${api.basePath}"
+                       doc:name="Listener /api/*"
+                       doc:description="Accepts patient record requests; every response carries X-Correlation-ID">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers><![CDATA[#[(vars.outboundHeaders default {}) ++ {'X-Correlation-ID': vars.correlationId default correlationId}]]]></http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body><![CDATA[#[payload]]]></http:body>
+                <http:headers><![CDATA[#[(vars.outboundHeaders default {}) ++ {'X-Correlation-ID': vars.correlationId default correlationId}]]]></http:headers>
+            </http:error-response>
+        </http:listener>
+        <flow-ref name="start-request-context"
+                  doc:name="Start request context"
+                  doc:description="Captures the correlation ID and start time and logs the incoming request"/>
+        <apikit:router config-ref="patient-sys-api-config"
+                       doc:name="APIkit router"
+                       doc:description="Rejects requests that do not match the spec and dispatches the rest"/>
+        <flow-ref name="log-response-sent"
+                  doc:name="Log response sent"
+                  doc:description="Logs the response status and request duration"/>
+    </flow>
+
+    <flow name="post:\patients:application\json:patient-sys-api-config"
+          doc:name="POST /patients"
+          doc:description="Stores a new patient record and returns it with its generated ID">
+        <flow-ref name="insert-patient"
+                  doc:name="Insert patient"
+                  doc:description="Inserts the record; a duplicate identity raises APP:DUPLICATE_PATIENT"/>
+        <set-variable variableName="httpStatus" value="#[201]"
+                      doc:name="Status 201"
+                      doc:description="Marks the response as Created"/>
+        <set-variable variableName="outboundHeaders" value="#[{ Location: '/api/patients/' ++ payload.patient_id }]"
+                      doc:name="Location header"
+                      doc:description="Points the Location header at the new patient resource"/>
+    </flow>
+
+    <flow name="get:\patients\(patientId):patient-sys-api-config"
+          doc:name="GET /patients/{patientId}"
+          doc:description="Returns one stored patient record">
+        <set-variable variableName="patientId" value="#[attributes.uriParams.patientId]"
+                      doc:name="Patient ID"
+                      doc:description="Reads the patient ID from the URI"/>
+        <flow-ref name="find-patient-by-id"
+                  doc:name="Find patient"
+                  doc:description="Selects the record; an unknown ID raises APP:PATIENT_NOT_FOUND"/>
+        <set-variable variableName="httpStatus" value="#[200]"
+                      doc:name="Status 200"
+                      doc:description="Marks the response as OK"/>
+    </flow>
+</mule>

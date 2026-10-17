@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- Unit tests of the DataWeave modules in src/main/resources/dwl. -->
+    <munit:config name="dataweave-modules-test-suite.xml"/>
+
+    <munit:test name="api-errors-maps-error-types-to-codes"
+                description="APP, APIKIT and DB error types map to catalogue codes; anything else is INTERNAL_ERROR">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import codeFor from dwl::ApiErrors
+output application/json
+---
+{
+    duplicate:   codeFor({ namespace: "APP",    identifier: "DUPLICATE_PATIENT" }),
+    notFound:    codeFor({ namespace: "APP",    identifier: "PATIENT_NOT_FOUND" }),
+    badRequest:  codeFor({ namespace: "APIKIT", identifier: "BAD_REQUEST" }),
+    dbDown:      codeFor({ namespace: "DB",     identifier: "CONNECTIVITY" }),
+    dbQuery:     codeFor({ namespace: "DB",     identifier: "QUERY_EXECUTION" }),
+    unknownApp:  codeFor({ namespace: "APP",    identifier: "SOMETHING_ELSE" }),
+    expression:  codeFor({ namespace: "MULE",   identifier: "EXPRESSION" })
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[{
+                duplicate: 'DUPLICATE_PATIENT', notFound: 'PATIENT_NOT_FOUND', badRequest: 'BAD_REQUEST',
+                dbDown: 'DOWNSTREAM_ERROR', dbQuery: 'INTERNAL_ERROR', unknownApp: 'INTERNAL_ERROR', expression: 'INTERNAL_ERROR' }]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="api-errors-statuses-follow-the-assignment-table"
+                description="Each code carries the HTTP status from the assignment's error table">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import statusFor from dwl::ApiErrors
+output application/json
+---
+["BAD_REQUEST", "PATIENT_NOT_FOUND", "DUPLICATE_PATIENT", "INVALID_BIRTH_DATE",
+ "CONSENT_REQUIRED", "DOWNSTREAM_ERROR", "INTERNAL_ERROR", "NOT_A_CODE"] map statusFor($)]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[[400, 404, 409, 422, 422, 502, 500, 500]]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="api-errors-builds-standard-body-in-utc"
+                description="The error body has the four standard fields and a UTC timestamp regardless of the input offset">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import errorBody from dwl::ApiErrors
+output application/json
+---
+errorBody("DUPLICATE_PATIENT", "6f1c2a9e-0b7d-4c1e-9a52-3c4d5e6f7a8b", |2026-10-15T12:21:07.345+02:00|)]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[{
+                error: {
+                    code: 'DUPLICATE_PATIENT',
+                    message: 'A patient with the same name and date of birth already exists.',
+                    correlationId: '6f1c2a9e-0b7d-4c1e-9a52-3c4d5e6f7a8b',
+                    timestamp: '2026-10-15T10:21:07Z'
+                } }]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="patient-records-insert-parameters-bind-null-for-absent-phone"
+                description="An absent phone becomes a NULL parameter; every other field is passed through">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import toInsertParameters from dwl::PatientRecords
+output application/java
+---
+toInsertParameters(readUrl("classpath://samples/record-input.json", "application/json") - "phone")]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload.phone]" expected="#[null]"/>
+            <munit-tools:assert-equals actual="#[sizeOf(payload)]" expected="#[10]" message="One parameter per inserted column"/>
+            <munit-tools:assert-equals actual="#[payload.birth_date]" expected="#['1985-04-12']"/>
+            <munit-tools:assert-equals actual="#[payload.family_name]" expected="#['Kovač']"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="patient-records-row-maps-to-record-contract"
+                description="A selected row maps to the record contract with a UTC registered_at and no internal columns">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import fromRow from dwl::PatientRecords
+output application/json
+---
+{
+    withPhone:    fromRow(readUrl("classpath://samples/patient-row.json", "application/json")),
+    withoutPhone: fromRow((readUrl("classpath://samples/patient-row.json", "application/json") - "phone") ++ { phone: null })
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <!-- orderBy $$: compare objects independently of key order -->
+            <munit-tools:assert-equals actual="#[payload.withPhone orderBy $$]"
+                                       expected="#[(readUrl('classpath://samples/record-input.json', 'application/json') ++ { patient_id: 'PAT-000123', status: 'ACTIVE', registered_at: '2026-10-15T10:21:07Z' }) orderBy $$]"/>
+            <munit-tools:assert-equals actual="#[payload.withoutPhone.phone?]" expected="#[false]"/>
+        </munit:validation>
+    </munit:test>
+</mule>
