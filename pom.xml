@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Build aggregator only: lets `mvn clean verify` at the repository root build and
+  test all three applications. It is deliberately NOT a parent POM: every Mule
+  application stays independently buildable, importable into Anypoint Studio and
+  deployable on its own.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.acme.clinic</groupId>
+    <artifactId>patient-registration-aggregator</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+    <name>Patient Registration APIs (aggregator)</name>
+
+    <modules>
+    </modules>
+</project>

@@ -1,0 +1,42 @@
+# Local PostgreSQL for patient-sys-api.
+#
+#   cp infrastructure/.env.example infrastructure/.env   # then set real local passwords
+#   docker compose -f infrastructure/docker-compose.yml up -d
+#
+# Data lives in the named volume "patient-registration-pgdata" and survives
+# restarts. Nothing here deletes data; see scripts/reset-local-db.sh for the
+# explicit reset.
+name: patient-registration
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: patient-registration-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: patients
+      POSTGRES_USER: patient_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infrastructure/.env}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in infrastructure/.env}
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Init scripts run in name order, only when the volume is empty.
+      - ../db/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+      - ./postgres-init/20-app-role.sh:/docker-entrypoint-initdb.d/20-app-role.sh:ro
+      # Mounted with a non-.sql suffix so the entrypoint does not run it twice;
+      # 20-app-role.sh applies it after the role exists.
+      - ../db/grants.sql:/docker-entrypoint-initdb.d/grants.sql.inc:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U patient_owner -d patients"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  pgdata:
+    name: patient-registration-pgdata
