@@ -1,0 +1,9 @@
+# CloudHub 2.0 "dev" environment. CloudHub routes HTTPS ingress to port 8081.
+# The Process API is called over HTTPS at its CloudHub URL. processApi.host is
+# supplied at deployment (GitHub variable PRC_API_HOST), because CloudHub assigns it.
+http:
+  port: "8081"
+
+processApi:
+  protocol: "HTTPS"
+  port: "443"

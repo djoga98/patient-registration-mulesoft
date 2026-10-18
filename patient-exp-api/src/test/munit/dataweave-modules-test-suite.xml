@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- Unit tests of the DataWeave modules in src/main/resources/dwl. Dates are fixed. -->
+    <munit:config name="dataweave-modules-test-suite.xml"/>
+
+    <munit:test name="portal-view-matches-the-assignment-step-6"
+                description="On 2026-10-15 the Process response of step 5 becomes exactly the portal view of step 6 (age 41)">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import toPortalPatient from dwl::PortalView
+output application/json
+---
+toPortalPatient(readUrl("classpath://samples/process-patient-case1.json", "application/json"), |2026-10-15|)]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload orderBy $$]" expected="#[{
+                patientId: 'PAT-000123', fullName: 'Ana Kovač', age: 41, category: 'ADULT',
+                email: 'ana.kovac@example.com', phone: '+38761111222', status: 'ACTIVE',
+                registeredAt: '2026-10-15T10:21:07Z' } orderBy $$]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="portal-view-omits-missing-phone"
+                description="A patient without phone has no phone field in the portal view">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import toPortalPatient from dwl::PortalView
+output application/json
+---
+toPortalPatient(readUrl("classpath://samples/process-patient-case2.json", "application/json"), |2026-10-15|)]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload.phone?]" expected="#[false]"/>
+            <munit-tools:assert-equals actual="#[payload.fullName]" expected="#['Luka Petrović']"/>
+            <munit-tools:assert-equals actual="#[payload.age]" expected="#[14]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="age-is-calculated-on-the-day-with-birthday-and-leap-day-boundaries"
+                description="Completed years on the given day; no fixed-length-year approximation">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import ageOn from dwl::PortalView
+output application/json
+---
+[
+    ageOn(|1985-04-12|, |2026-04-11|),
+    ageOn(|1985-04-12|, |2026-04-12|),
+    ageOn(|2000-02-29|, |2025-02-28|),
+    ageOn(|2000-02-29|, |2025-03-01|),
+    ageOn(|1950-01-20|, |2026-10-15|),
+    ageOn(|2026-10-15|, |2026-10-15|)
+]]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[[40, 41, 24, 25, 76, 0]]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="registration-is-forwarded-unchanged-with-channel-portal"
+                description="toProcessRegistration adds channel PORTAL, replaces any caller channel and changes nothing else">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import toProcessRegistration from dwl::PortalView
+output application/json
+var request = readUrl("classpath://samples/portal-case1-ana.json", "application/json")
+---
+{
+    plain:    toProcessRegistration(request),
+    override: toProcessRegistration(request ++ { channel: "KIOSK" })
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload.plain orderBy $$]"
+                                       expected="#[(readUrl('classpath://samples/portal-case1-ana.json', 'application/json') ++ { channel: 'PORTAL' }) orderBy $$]"/>
+            <munit-tools:assert-equals actual="#[payload.override.channel]" expected="#['PORTAL']"/>
+            <munit-tools:assert-equals actual="#[sizeOf(payload.override.*channel)]" expected="#[1]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="downstream-and-error-catalogue-are-consistent"
+                description="Lower-API answers keep their code; transient HTTP errors and exhausted retries are 502">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import errorCodeFor from dwl::Downstream
+import codeFor, statusFor from dwl::ApiErrors
+output application/json
+fun body(code) = { error: { code: code } }
+---
+{
+    downstream: [
+        errorCodeFor(200, {}), errorCodeFor(404, body("PATIENT_NOT_FOUND")), errorCodeFor(422, body("CONSENT_REQUIRED")),
+        errorCodeFor(502, body("DOWNSTREAM_ERROR")), errorCodeFor(503, "Service Unavailable")
+    ],
+    statuses: [
+        statusFor(codeFor({ namespace: "MULE", identifier: "RETRY_EXHAUSTED" })),
+        statusFor(codeFor({ namespace: "APP", identifier: "PATIENT_NOT_FOUND" })),
+        statusFor(codeFor({ namespace: "APIKIT", identifier: "BAD_REQUEST" }))
+    ]
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload.downstream]"
+                                       expected="#[[null, 'PATIENT_NOT_FOUND', 'CONSENT_REQUIRED', 'DOWNSTREAM_ERROR', 'DOWNSTREAM_ERROR']]"/>
+            <munit-tools:assert-equals actual="#[payload.statuses]" expected="#[[502, 404, 400]]"/>
+        </munit:validation>
+    </munit:test>
+</mule>

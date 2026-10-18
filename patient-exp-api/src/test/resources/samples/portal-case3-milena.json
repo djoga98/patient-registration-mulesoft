@@ -1,0 +1,14 @@
+{
+  "firstName": "Milena",
+  "lastName": "Jović",
+  "dateOfBirth": "1950-01-20",
+  "gender": "female",
+  "contact": {
+    "email": "milena.jovic@example.com",
+    "phone": "(065) 222 333"
+  },
+  "consents": {
+    "dataProcessing": true,
+    "smsReminders": true
+  }
+}

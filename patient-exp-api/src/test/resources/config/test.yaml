@@ -1,0 +1,8 @@
+# MUnit only. Every call to the Process API is mocked; nothing listens on 18182.
+http:
+  port: "18081"
+
+processApi:
+  protocol: "HTTP"
+  host: "localhost"
+  port: "18182"

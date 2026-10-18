@@ -1,0 +1,89 @@
+#%RAML 1.0
+title: Patient Experience API
+description: |
+  Portal-facing contract for patient registration. Accepts or creates the
+  correlation ID (X-Correlation-ID), forwards registrations to the Patient
+  Registration Process API with channel PORTAL, and shapes responses for the
+  portal (full name, age on the day of the request).
+version: v1
+mediaType: application/json
+protocols: [ HTTP, HTTPS ]
+
+traits:
+  correlated: !include traits/correlated.raml
+
+uses:
+  portal: types/portal-types.raml
+
+/patients:
+  post:
+    displayName: Register a new patient
+    is: [ correlated ]
+    body:
+      application/json:
+        type: portal.PortalRegistration
+        example: !include examples/portal-registration.json
+    responses:
+      201:
+        headers:
+          Location:
+            type: string
+            example: /api/patients/PAT-000123
+        body:
+          application/json:
+            type: portal.PortalPatient
+            example: !include examples/portal-patient.json
+      400:
+        body:
+          application/json:
+            type: portal.ErrorResponse
+      409:
+        description: A patient with the same name and date of birth already exists.
+        body:
+          application/json:
+            type: portal.ErrorResponse
+            example: !include examples/error-duplicate.json
+      422:
+        description: INVALID_BIRTH_DATE or CONSENT_REQUIRED.
+        body:
+          application/json:
+            type: portal.ErrorResponse
+      500:
+        body:
+          application/json:
+            type: portal.ErrorResponse
+      502:
+        description: A lower API is unreachable or timed out.
+        body:
+          application/json:
+            type: portal.ErrorResponse
+
+  /{patientId}:
+    uriParameters:
+      patientId: portal.PatientId
+    get:
+      displayName: Read one patient
+      is: [ correlated ]
+      responses:
+        200:
+          body:
+            application/json:
+              type: portal.PortalPatient
+              example: !include examples/portal-patient.json
+        400:
+          body:
+            application/json:
+              type: portal.ErrorResponse
+        404:
+          body:
+            application/json:
+              type: portal.ErrorResponse
+        500:
+          body:
+            application/json:
+              type: portal.ErrorResponse
+        502:
+          description: A lower API is unreachable, timed out or unavailable after retries.
+          body:
+            application/json:
+              type: portal.ErrorResponse

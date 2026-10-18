@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!--
+      Calls to the Process API, the only lower API of this application.
+
+      Every request has an explicit response timeout (connect timeout: global.xml) and
+      sends vars.correlationId as X-Correlation-ID.
+
+      Retries: GET only. Its response validator makes 503 the only status that raises an
+      error, so inside until-successful the only possible errors are HTTP:CONNECTIVITY,
+      HTTP:TIMEOUT and HTTP:SERVICE_UNAVAILABLE, exactly the transient failures. A 4xx
+      never raises inside the scope and is therefore never retried. Exhausted retries
+      raise MULE:RETRY_EXHAUSTED -> 502 DOWNSTREAM_ERROR.
+
+      POST is never retried: the registration may already be committed when the response is
+      lost, and a blind retry would then answer 409 for the patient's own registration.
+    -->
+
+    <sub-flow name="create-patient"
+              doc:name="create-patient"
+              doc:description="POST the registration to the Process API once, without retries">
+        <logger level="INFO" category="com.acme.patient.exp"
+                message="#['Calling Process API method=POST path=$(p(&quot;processApi.basePath&quot;))/patients']"
+                doc:name="Log Process API call"
+                doc:description="Logs the outbound call (no payload)"/>
+        <set-variable variableName="downstreamStartMillis" value="#[now() as Number { unit: 'milliseconds' }]"
+                      doc:name="Call start time"
+                      doc:description="Start of the Process API call, for its duration"/>
+        <http:request config-ref="process-api-request-config"
+                      method="POST" path="/patients"
+                      responseTimeout="${processApi.responseTimeoutMillis}"
+                      sendCorrelationId="NEVER"
+                      doc:name="POST /patients"
+                      doc:description="Registers the patient; every status is returned for explicit interpretation">
+            <http:headers><![CDATA[#[{ 'X-Correlation-ID': vars.correlationId, 'Content-Type': 'application/json' }]]]></http:headers>
+            <http:response-validator>
+                <http:success-status-code-validator values="100..599"/>
+            </http:response-validator>
+        </http:request>
+        <flow-ref name="handle-process-api-response"
+                  doc:name="Handle Process API response"
+                  doc:description="Logs the status and turns unsuccessful responses into typed errors"/>
+    </sub-flow>
+
+    <sub-flow name="get-patient"
+              doc:name="get-patient"
+              doc:description="GET one patient from the Process API, retrying transient failures">
+        <until-successful maxRetries="${retry.get.maxRetries}" millisBetweenRetries="${retry.get.delayMillis}"
+                          doc:name="Retry transient failures"
+                          doc:description="Retries connection errors, timeouts and 503 only; at most 3 attempts">
+            <logger level="INFO" category="com.acme.patient.exp"
+                    message="#['Calling Process API method=GET path=$(p(&quot;processApi.basePath&quot;))/patients/$(vars.patientId)']"
+                    doc:name="Log Process API call"
+                    doc:description="Logs each outbound attempt (patient ID only)"/>
+            <set-variable variableName="downstreamStartMillis" value="#[now() as Number { unit: 'milliseconds' }]"
+                          doc:name="Call start time"
+                          doc:description="Start of this attempt, for its duration"/>
+            <http:request config-ref="process-api-request-config"
+                          method="GET" path="/patients/{patientId}"
+                          responseTimeout="${processApi.responseTimeoutMillis}"
+                          sendCorrelationId="NEVER"
+                          doc:name="GET /patients/{patientId}"
+                          doc:description="Reads the patient; only 503 raises an error so only transient failures are retried">
+                <http:headers><![CDATA[#[{ 'X-Correlation-ID': vars.correlationId }]]]></http:headers>
+                <http:uri-params><![CDATA[#[{ patientId: vars.patientId }]]]></http:uri-params>
+                <http:response-validator>
+                    <http:failure-status-code-validator values="503"/>
+                </http:response-validator>
+            </http:request>
+        </until-successful>
+        <flow-ref name="handle-process-api-response"
+                  doc:name="Handle Process API response"
+                  doc:description="Logs the status and turns unsuccessful responses into typed errors"/>
+    </sub-flow>
+
+    <sub-flow name="handle-process-api-response"
+              doc:name="handle-process-api-response"
+              doc:description="Keeps the meaning of Process API errors: 404/409/422/400 stay, everything else is 502">
+        <logger level="INFO" category="com.acme.patient.exp"
+                message="#['Process API responded status=$(attributes.statusCode) durationMs=$((now() as Number { unit: &quot;milliseconds&quot; }) - vars.downstreamStartMillis)']"
+                doc:name="Log Process API response"
+                doc:description="Logs the lower API status and call duration"/>
+        <set-variable variableName="downstreamErrorCode"
+                      value="#[output application/java --- dwl::Downstream::errorCodeFor(attributes.statusCode, payload)]"
+                      doc:name="Classify response"
+                      doc:description="null for 2xx, otherwise the error code to answer with"/>
+        <choice doc:name="Unsuccessful?"
+                doc:description="Raises the typed error that matches the Process API answer">
+            <when expression="#[vars.downstreamErrorCode == 'PATIENT_NOT_FOUND']"
+                  doc:name="404 PATIENT_NOT_FOUND"
+                  doc:description="The Process API does not know the patient">
+                <raise-error type="APP:PATIENT_NOT_FOUND" description="Process API answered 404 PATIENT_NOT_FOUND"
+                             doc:name="Raise PATIENT_NOT_FOUND"
+                             doc:description="Propagates 404"/>
+            </when>
+            <when expression="#[vars.downstreamErrorCode == 'DUPLICATE_PATIENT']"
+                  doc:name="409 DUPLICATE_PATIENT"
+                  doc:description="The Process API rejected a duplicate identity">
+                <raise-error type="APP:DUPLICATE_PATIENT" description="Process API answered 409 DUPLICATE_PATIENT"
+                             doc:name="Raise DUPLICATE_PATIENT"
+                             doc:description="Propagates 409"/>
+            </when>
+            <when expression="#[vars.downstreamErrorCode == 'INVALID_BIRTH_DATE']"
+                  doc:name="422 INVALID_BIRTH_DATE"
+                  doc:description="Lower API rejected the birth date">
+                <raise-error type="APP:INVALID_BIRTH_DATE" description="Lower API answered 422 INVALID_BIRTH_DATE"
+                             doc:name="Raise INVALID_BIRTH_DATE"
+                             doc:description="Propagates 422"/>
+            </when>
+            <when expression="#[vars.downstreamErrorCode == 'CONSENT_REQUIRED']"
+                  doc:name="422 CONSENT_REQUIRED"
+                  doc:description="Lower API rejected missing consent">
+                <raise-error type="APP:CONSENT_REQUIRED" description="Lower API answered 422 CONSENT_REQUIRED"
+                             doc:name="Raise CONSENT_REQUIRED"
+                             doc:description="Propagates 422"/>
+            </when>
+            <when expression="#[vars.downstreamErrorCode == 'BAD_REQUEST']"
+                  doc:name="400 BAD_REQUEST"
+                  doc:description="The Process API rejected the request as invalid">
+                <raise-error type="APP:BAD_REQUEST" description="Process API answered 400 BAD_REQUEST"
+                             doc:name="Raise BAD_REQUEST"
+                             doc:description="Propagates 400"/>
+            </when>
+            <when expression="#[vars.downstreamErrorCode != null]"
+                  doc:name="Any other failure"
+                  doc:description="5xx or an unexpected status from the Process API">
+                <raise-error type="APP:DOWNSTREAM_ERROR" description="Process API answered with an unexpected status"
+                             doc:name="Raise DOWNSTREAM_ERROR"
+                             doc:description="Answers 502"/>
+            </when>
+        </choice>
+    </sub-flow>
+</mule>

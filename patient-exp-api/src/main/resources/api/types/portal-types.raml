@@ -1,0 +1,88 @@
+#%RAML 1.0 Library
+usage: Data types of the patient portal contract.
+
+types:
+  PatientId:
+    type: string
+    description: Patient identifier, PAT- plus six digits.
+    pattern: ^PAT-[0-9]{6}$
+    example: PAT-000123
+
+  PersonName:
+    type: string
+    description: Name as entered; must contain at least one non-blank character.
+    pattern: ^\s*\S[\s\S]*$
+    maxLength: 100
+
+  EmailAddress:
+    type: string
+    pattern: ^[^@\s]+@[^@\s]+\.[^@\s]+$
+    maxLength: 254
+
+  PhoneNumber:
+    type: string
+    description: Digits with an optional leading +; spaces, dashes and brackets are allowed.
+    pattern: ^[+0-9 ()\-]{3,32}$
+
+  PortalRegistration:
+    type: object
+    description: Registration as sent by the patient portal.
+    properties:
+      firstName: PersonName
+      lastName: PersonName
+      dateOfBirth:
+        type: date-only
+        description: yyyy-MM-dd
+      gender:
+        type: string
+        enum: [ female, male, other ]
+      contact:
+        type: object
+        properties:
+          email: EmailAddress
+          phone?: PhoneNumber | nil
+      consents:
+        type: object
+        properties:
+          dataProcessing: boolean
+          smsReminders?: boolean | nil
+
+  PortalPatient:
+    type: object
+    description: The portal's flat view of a patient. Age is calculated on the day of the request.
+    properties:
+      patientId: PatientId
+      fullName:
+        type: string
+        example: Ana Kovač
+      age:
+        type: integer
+        minimum: 0
+      category:
+        type: string
+        enum: [ MINOR, ADULT, SENIOR ]
+      email: string
+      phone?: string
+      status:
+        type: string
+        enum: [ ACTIVE, INACTIVE ]
+      registeredAt:
+        type: datetime
+        format: rfc3339
+
+  ErrorResponse:
+    type: object
+    description: Error body shared by all three patient APIs.
+    properties:
+      error:
+        type: object
+        properties:
+          code:
+            type: string
+          message:
+            type: string
+          correlationId:
+            type: string
+          timestamp:
+            type: datetime
+            format: rfc3339

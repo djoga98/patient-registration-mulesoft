@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!--
+      Correlation and request logging, identical in the three patient APIs.
+
+      vars.correlationId is the value propagated downstream, returned in the
+      X-Correlation-ID response header and written into error bodies. It is the
+      incoming X-Correlation-ID header, or the event's own correlation ID when the
+      header is absent (generated as a UUID, see <configuration> in global.xml).
+      The HTTP listener adopts an incoming X-Correlation-ID as the event correlation
+      ID, so the %X{correlationId} printed by log4j2 is the same value; MUnit
+      asserts that equality.
+
+      Log lines never contain payloads or patient fields: method, path (which may
+      carry a patient ID), status and timings only.
+    -->
+
+    <sub-flow name="start-request-context"
+              doc:name="start-request-context"
+              doc:description="Captures the correlation ID and start time and logs the incoming request">
+        <ee:transform doc:name="Capture request context"
+                      doc:description="Stores the correlation ID and request start time in variables">
+            <ee:variables>
+                <ee:set-variable variableName="correlationId"><![CDATA[%dw 2.0
+output application/java
+var incoming = attributes.headers['x-correlation-id']
+---
+if (isBlank(incoming)) correlationId else incoming]]></ee:set-variable>
+                <ee:set-variable variableName="requestStartMillis"><![CDATA[%dw 2.0
+output application/java
+---
+now() as Number { unit: "milliseconds" }]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <logger level="INFO" category="com.acme.patient.exp"
+                message="#['Request received method=$(attributes.method) path=$(attributes.requestPath)']"
+                doc:name="Log request received"
+                doc:description="Logs method and path of the incoming request"/>
+    </sub-flow>
+
+    <sub-flow name="log-response-sent"
+              doc:name="log-response-sent"
+              doc:description="Logs the response status and the request duration">
+        <logger level="INFO" category="com.acme.patient.exp"
+                message="#['Response sent status=$(vars.httpStatus default 200) durationMs=$((now() as Number { unit: 'milliseconds' }) - (vars.requestStartMillis default 0))']"
+                doc:name="Log response sent"
+                doc:description="Logs status and duration of a successful request"/>
+    </sub-flow>
+</mule>

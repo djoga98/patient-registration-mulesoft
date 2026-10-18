@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!--
+      The application's only error handler (default for every flow, see global.xml).
+
+      Error type -> code/status/message mapping lives in dwl/ApiErrors.dwl. Exceptions are
+      not logged (logException="false"): lower-API and driver messages can quote rejected values,
+      i.e. patient data. The log line carries the Mule error type instead.
+
+      When an operation flow fails, this handler runs there first and again in the main
+      flow the error propagates to; vars.errorCode marks the response as already built.
+    -->
+    <error-handler name="global-error-handler"
+                   doc:name="global-error-handler"
+                   doc:description="Turns any error into the standard error body and status">
+        <on-error-propagate type="ANY" logException="false"
+                            doc:name="Any error"
+                            doc:description="Builds the standard error response and propagates it to the listener">
+            <choice doc:name="Response already built?"
+                    doc:description="Skips work when a nested flow already handled this error">
+                <when expression="#[vars.errorCode == null]"
+                      doc:name="Not yet handled"
+                      doc:description="First handler on the error path">
+                    <ee:transform doc:name="Build error response"
+                                  doc:description="Maps the Mule error type to the standard error body and HTTP status">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+import codeFor, errorBody from dwl::ApiErrors
+output application/json
+---
+errorBody(codeFor(error.errorType), vars.correlationId default correlationId, now())]]></ee:set-payload>
+                        </ee:message>
+                        <ee:variables>
+                            <ee:set-variable variableName="errorCode"><![CDATA[%dw 2.0
+import codeFor from dwl::ApiErrors
+output application/java
+---
+codeFor(error.errorType)]]></ee:set-variable>
+                            <ee:set-variable variableName="httpStatus"><![CDATA[%dw 2.0
+import codeFor, statusFor from dwl::ApiErrors
+output application/java
+---
+statusFor(codeFor(error.errorType))]]></ee:set-variable>
+                            <ee:set-variable variableName="errorTypeName"><![CDATA[%dw 2.0
+import qualifiedName from dwl::ApiErrors
+output application/java
+---
+qualifiedName(error.errorType)]]></ee:set-variable>
+                        </ee:variables>
+                    </ee:transform>
+                    <choice doc:name="Server or client error?"
+                            doc:description="Logs 5xx at ERROR and 4xx at WARN">
+                        <when expression="#[vars.httpStatus >= 500]"
+                              doc:name="5xx"
+                              doc:description="Unexpected or downstream failure">
+                            <logger level="ERROR" category="com.acme.patient.exp"
+                                    message="#['Response sent status=$(vars.httpStatus) code=$(vars.errorCode) errorType=$(vars.errorTypeName) durationMs=$((now() as Number { unit: 'milliseconds' }) - (vars.requestStartMillis default 0))']"
+                                    doc:name="Log server error"
+                                    doc:description="Logs status, error code and Mule error type of a failed request"/>
+                        </when>
+                        <otherwise doc:name="4xx"
+                                   doc:description="Request rejected by validation or a business condition">
+                            <logger level="WARN" category="com.acme.patient.exp"
+                                    message="#['Response sent status=$(vars.httpStatus) code=$(vars.errorCode) errorType=$(vars.errorTypeName) durationMs=$((now() as Number { unit: 'milliseconds' }) - (vars.requestStartMillis default 0))']"
+                                    doc:name="Log client error"
+                                    doc:description="Logs status, error code and Mule error type of a rejected request"/>
+                        </otherwise>
+                    </choice>
+                </when>
+            </choice>
+        </on-error-propagate>
+    </error-handler>
+</mule>

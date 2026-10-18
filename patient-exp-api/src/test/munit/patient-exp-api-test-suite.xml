@@ -1,0 +1,689 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!--
+      API-level tests through the real HTTP listener and APIkit router. Every call to the
+      Process API (http:request with config-ref process-api-request-config) is mocked.
+    -->
+    <munit:config name="patient-exp-api-test-suite.xml"/>
+
+    <http:request-config name="test-http-client">
+        <http:request-connection host="localhost" port="${http.port}"/>
+    </http:request-config>
+
+    <!-- Sends payload to the API. Inputs: vars.method, vars.path, vars.requestHeaders. -->
+    <sub-flow name="call-exp-api">
+        <http:request config-ref="test-http-client" method="#[vars.method]" path="#[vars.path]">
+            <http:headers><![CDATA[#[vars.requestHeaders default {}]]]></http:headers>
+            <http:response-validator>
+                <http:success-status-code-validator values="100..599"/>
+            </http:response-validator>
+        </http:request>
+    </sub-flow>
+
+    <!-- ========================================================================= POST -->
+
+    <munit:test name="post-case1-forwards-with-channel-portal-and-returns-portal-view"
+                description="Case 1: the request reaches the Process API unchanged plus channel PORTAL; the response is the flat portal view">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:spy processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:before-call>
+                    <munit-tools:assert-equals actual="#[payload.channel]" expected="#['PORTAL']"/>
+                    <!-- orderBy $$: compare objects independently of key order -->
+                    <munit-tools:assert-equals actual="#[(payload - 'channel') orderBy $$]"
+                                               expected="#[readUrl('classpath://samples/portal-case1-ana.json', 'application/json') orderBy $$]"
+                                               message="Everything except channel must be forwarded unchanged (no normalisation here)"/>
+                    <munit-tools:assert-equals actual="#[vars.correlationId]" expected="#['exp-post-001']"/>
+                </munit-tools:before-call>
+            </munit-tools:spy>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-patient-case1.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 201 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json', 'X-Correlation-ID': 'exp-post-001' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[201]"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'x-correlation-id']" expected="#['exp-post-001']"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.location]" expected="#['/api/patients/PAT-000123']"/>
+            <munit-tools:assert-equals actual="#[(payload - 'age') orderBy $$]"
+                                       expected="#[{ patientId: 'PAT-000123', fullName: 'Ana Kovač', category: 'ADULT', email: 'ana.kovac@example.com',
+                                                     phone: '+38761111222', status: 'ACTIVE', registeredAt: '2026-10-15T10:21:07Z' } orderBy $$]"
+                                       message="Portal view must match the assignment's step 6"/>
+            <munit-tools:assert-equals actual="#[payload.age]"
+                                       expected="#[dw::core::Periods::between((now() >> p('clinic.timeZone')) as Date, |1985-04-12|).years]"
+                                       message="Age is the completed years on the day of the request"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-client-supplied-channel-is-replaced-by-portal"
+                description="A channel sent by the caller cannot override PORTAL">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:spy processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:before-call>
+                    <munit-tools:assert-equals actual="#[payload.channel]" expected="#['PORTAL']"/>
+                    <munit-tools:assert-equals actual="#[sizeOf(payload.*channel)]" expected="#[1]" message="Exactly one channel key"/>
+                </munit-tools:before-call>
+            </munit-tools:spy>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-patient-case1.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 201 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload mimeType="application/json"
+                         value="#[output application/json --- readUrl('classpath://samples/portal-case1-ana.json', 'application/json') ++ { channel: 'KIOSK' }]"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[201]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-case2-patient-without-phone-has-no-phone-field"
+                description="Case 2: the portal view leaves the phone out when the patient has none">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-patient-case2.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 201 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case2-luka.json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[201]"/>
+            <munit-tools:assert-equals actual="#[payload.fullName]" expected="#['Luka Petrović']"/>
+            <munit-tools:assert-equals actual="#[payload.category]" expected="#['MINOR']"/>
+            <munit-tools:assert-equals actual="#[payload.phone?]" expected="#[false]" message="No phone field"/>
+            <munit-tools:assert-equals actual="#[keysOf(payload) map ($ as String) orderBy $]"
+                                       expected="#[['age', 'category', 'email', 'fullName', 'patientId', 'registeredAt', 'status']]"
+                                       message="Only the portal fields are exposed"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-case7-invalid-request-returns-400-without-calling-process-api"
+                description="Case 7: no email and gender 'unknown' are rejected by the portal contract">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case7-invalid.json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json', 'X-Correlation-ID': 'exp-400-001' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[400]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['BAD_REQUEST']"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#['exp-400-001']"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'x-correlation-id']" expected="#['exp-400-001']"/>
+            <munit-tools:verify-call processor="http:request" times="0">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-case4-duplicate-propagates-409"
+                description="Case 4 path: 409 DUPLICATE_PATIENT from the Process API reaches the portal as 409">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-error-duplicate_patient.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 409 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json', 'X-Correlation-ID': 'exp-409-001' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[409]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['DUPLICATE_PATIENT']"/>
+            <munit-tools:assert-equals actual="#[payload.error.message]" expected="#['A patient with the same name and date of birth already exists.']"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#['exp-409-001']"/>
+            <munit-tools:verify-call processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-case5-consent-required-propagates-422"
+                description="Case 5 path: 422 CONSENT_REQUIRED from the Process API keeps status and code">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-error-consent_required.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 422 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case2-luka.json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[422]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['CONSENT_REQUIRED']"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-case6-invalid-birth-date-propagates-422"
+                description="Case 6 path: 422 INVALID_BIRTH_DATE from the Process API keeps status and code">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-error-invalid_birth_date.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 422 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case2-luka.json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[422]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['INVALID_BIRTH_DATE']"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-process-api-bad-request-propagates-400"
+                description="A 400 BAD_REQUEST from the Process API stays 400 at the portal">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-error-bad_request.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 400 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case2-luka.json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[400]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['BAD_REQUEST']"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-process-api-timeout-returns-502-without-retry"
+                description="A timed-out registration is never retried and answers 502 DOWNSTREAM_ERROR">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:TIMEOUT"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json', 'X-Correlation-ID': 'exp-502-001' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[502]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['DOWNSTREAM_ERROR']"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#['exp-502-001']"/>
+            <munit-tools:verify-call processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="post-process-api-connection-refused-returns-502-without-retry"
+                description="A refused connection on POST is not retried and answers 502 DOWNSTREAM_ERROR">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:CONNECTIVITY"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <set-variable variableName="method" value="POST"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'Content-Type': 'application/json' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[502]"/>
+            <munit-tools:verify-call processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ========================================================================== GET -->
+
+    <munit:test name="get-case8-returns-portal-view"
+                description="Case 8: GET returns the same portal shape as POST">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-patient-case1.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'X-Correlation-ID': 'exp-get-001' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[200]"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'x-correlation-id']" expected="#['exp-get-001']"/>
+            <munit-tools:assert-equals actual="#[payload.fullName]" expected="#['Ana Kovač']"/>
+            <munit-tools:assert-equals actual="#[payload.phone]" expected="#['+38761111222']"/>
+            <munit-tools:assert-that expression="#[payload.age]" is="#[MunitTools::greaterThanOrEqualTo(41)]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="get-case9-not-found-propagates-404-without-retry"
+                description="Case 9 path: 404 PATIENT_NOT_FOUND reaches the portal as 404 and is not retried">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-error-patient_not_found.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 404 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-999999"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'X-Correlation-ID': 'exp-404-001' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[404]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['PATIENT_NOT_FOUND']"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#['exp-404-001']"/>
+            <munit-tools:verify-call processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="get-downstream-error-from-process-api-is-not-retried"
+                description="A 502 from the Process API (its own retries exhausted) is not retried again here">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-error-downstream_error.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 502 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[502]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['DOWNSTREAM_ERROR']"/>
+            <munit-tools:verify-call processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="get-connection-failure-is-retried-three-times-then-502"
+                description="Connection errors on GET are retried: 3 attempts, then 502 DOWNSTREAM_ERROR">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:CONNECTIVITY"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'X-Correlation-ID': 'exp-retry-001' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[502]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['DOWNSTREAM_ERROR']"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#['exp-retry-001']"/>
+            <munit-tools:verify-call processor="http:request" times="3">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="get-timeout-is-retried-three-times-then-502"
+                description="Timeouts on GET are retried: 3 attempts, then 502">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:TIMEOUT"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[502]"/>
+            <munit-tools:verify-call processor="http:request" times="3">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="get-service-unavailable-is-retried-three-times-then-502"
+                description="503 on GET is retried: 3 attempts, then 502">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:SERVICE_UNAVAILABLE"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[502]"/>
+            <munit-tools:verify-call processor="http:request" times="3">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="get-malformed-patient-id-returns-400"
+                description="An ID that is not PAT-###### is rejected by the portal contract without a lower call">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/123"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[400]"/>
+            <munit-tools:verify-call processor="http:request" times="0">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <!-- =============================================================== correlation ID -->
+
+    <munit:test name="caller-correlation-id-is-forwarded-and-returned"
+                description="The caller's X-Correlation-ID is the runtime correlation ID, is sent to the Process API and returned">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:spy processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:before-call>
+                    <munit-tools:assert-equals actual="#[vars.correlationId]" expected="#['6f1c2a9e-0b7d-4c1e-9a52-3c4d5e6f7a8b']"/>
+                    <munit-tools:assert-equals actual="#[correlationId]" expected="#['6f1c2a9e-0b7d-4c1e-9a52-3c4d5e6f7a8b']"/>
+                </munit-tools:before-call>
+            </munit-tools:spy>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-patient-case1.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'X-Correlation-ID': '6f1c2a9e-0b7d-4c1e-9a52-3c4d5e6f7a8b' }]"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[200]"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'x-correlation-id']" expected="#['6f1c2a9e-0b7d-4c1e-9a52-3c4d5e6f7a8b']"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="missing-correlation-id-is-generated-forwarded-and-returned"
+                description="Without X-Correlation-ID a UUID is generated, sent to the Process API, returned and put in the error body">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:spy processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:before-call>
+                    <munit-tools:assert-that expression="#[vars.correlationId]"
+                                             is="#[MunitTools::matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\$')]"/>
+                    <munit-tools:assert-equals actual="#[vars.correlationId]" expected="#[correlationId]"
+                                               message="The generated value is the one every log line carries"/>
+                </munit-tools:before-call>
+            </munit-tools:spy>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-error-patient_not_found.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 404 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-999999"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[404]"/>
+            <munit-tools:assert-that expression="#[attributes.headers.'x-correlation-id']"
+                                     is="#[MunitTools::matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\$')]"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#[attributes.headers.'x-correlation-id']"/>
+        </munit:validation>
+    </munit:test>
+</mule>

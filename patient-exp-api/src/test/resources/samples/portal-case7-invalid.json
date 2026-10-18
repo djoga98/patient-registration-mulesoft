@@ -1,0 +1,12 @@
+{
+  "firstName": "Petar",
+  "lastName": "Babić",
+  "dateOfBirth": "1992-06-15",
+  "gender": "unknown",
+  "contact": {
+    "phone": "+387 66 444 555"
+  },
+  "consents": {
+    "dataProcessing": true
+  }
+}

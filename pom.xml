@@ -19,6 +19,7 @@
     <modules>
         <module>patient-sys-api</module>
         <module>patient-prc-api</module>
+        <module>patient-exp-api</module>
     </modules>
 
     <build>

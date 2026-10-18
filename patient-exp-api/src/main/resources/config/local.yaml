@@ -1,0 +1,7 @@
+http:
+  port: "8081"
+
+processApi:
+  protocol: "HTTP"
+  host: "localhost"
+  port: "8082"

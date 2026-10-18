@@ -1,0 +1,12 @@
+{
+  "patientId": "PAT-000124",
+  "firstName": "Luka",
+  "lastName": "Petrović",
+  "dateOfBirth": "2012-09-03",
+  "gender": "male",
+  "category": "MINOR",
+  "contact": { "email": "luka.petrovic@example.com" },
+  "consents": { "dataProcessing": true, "smsReminders": false },
+  "status": "ACTIVE",
+  "registeredAt": "2026-10-15T10:22:00Z"
+}

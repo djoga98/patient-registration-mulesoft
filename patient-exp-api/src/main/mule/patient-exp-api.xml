@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <flow name="patient-exp-api-main"
+          doc:name="patient-exp-api-main"
+          doc:description="Portal entry point: correlation ID, spec validation, routing to an operation flow">
+        <http:listener config-ref="http-listener-config" path="${api.basePath}"
+                       doc:name="Listener /api/*"
+                       doc:description="Accepts portal requests; every response carries X-Correlation-ID">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers><![CDATA[#[(vars.outboundHeaders default {}) ++ {'X-Correlation-ID': vars.correlationId default correlationId}]]]></http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body><![CDATA[#[payload]]]></http:body>
+                <http:headers><![CDATA[#[(vars.outboundHeaders default {}) ++ {'X-Correlation-ID': vars.correlationId default correlationId}]]]></http:headers>
+            </http:error-response>
+        </http:listener>
+        <flow-ref name="start-request-context"
+                  doc:name="Start request context"
+                  doc:description="Accepts the caller's X-Correlation-ID or uses a generated UUID; logs the request"/>
+        <apikit:router config-ref="patient-exp-api-config"
+                       doc:name="APIkit router"
+                       doc:description="Rejects requests that do not match the portal contract and dispatches the rest"/>
+        <flow-ref name="log-response-sent"
+                  doc:name="Log response sent"
+                  doc:description="Logs the response status and request duration"/>
+    </flow>
+
+    <flow name="post:\patients:application\json:patient-exp-api-config"
+          doc:name="POST /patients"
+          doc:description="Forwards the portal registration with channel PORTAL and returns the portal view">
+        <ee:transform doc:name="Add channel PORTAL"
+                      doc:description="Passes the portal request on unchanged, adding channel PORTAL">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+import toProcessRegistration from dwl::PortalView
+output application/json
+---
+toProcessRegistration(payload)]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        <flow-ref name="create-patient"
+                  doc:name="Register via Process API"
+                  doc:description="Registers the patient through the Process API (never retried)"/>
+        <flow-ref name="to-portal-patient"
+                  doc:name="To portal view"
+                  doc:description="Shapes the registered patient for the portal"/>
+        <set-variable variableName="httpStatus" value="#[201]"
+                      doc:name="Status 201"
+                      doc:description="Marks the response as Created"/>
+        <set-variable variableName="outboundHeaders" value="#[{ Location: '/api/patients/' ++ payload.patientId }]"
+                      doc:name="Location header"
+                      doc:description="Points the Location header at the new patient resource"/>
+    </flow>
+
+    <flow name="get:\patients\(patientId):patient-exp-api-config"
+          doc:name="GET /patients/{patientId}"
+          doc:description="Reads one patient through the Process API and returns the portal view">
+        <set-variable variableName="patientId" value="#[attributes.uriParams.patientId]"
+                      doc:name="Patient ID"
+                      doc:description="Reads the patient ID from the URI"/>
+        <flow-ref name="get-patient"
+                  doc:name="Get patient via Process API"
+                  doc:description="Reads the patient through the Process API, retrying transient failures"/>
+        <flow-ref name="to-portal-patient"
+                  doc:name="To portal view"
+                  doc:description="Shapes the patient for the portal"/>
+        <set-variable variableName="httpStatus" value="#[200]"
+                      doc:name="Status 200"
+                      doc:description="Marks the response as OK"/>
+    </flow>
+
+    <sub-flow name="to-portal-patient"
+              doc:name="to-portal-patient"
+              doc:description="Process API patient to the portal's flat view with full name and age on the day of the request">
+        <ee:transform doc:name="Patient to portal view"
+                      doc:description="Builds fullName and calculates age today in the clinic time zone">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+import toPortalPatient, todayIn from dwl::PortalView
+output application/json
+---
+toPortalPatient(payload, todayIn(p('clinic.timeZone')))]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </sub-flow>
+</mule>

@@ -1,0 +1,12 @@
+{
+  "firstName": "Luka",
+  "lastName": "Petrović",
+  "dateOfBirth": "2012-09-03",
+  "gender": "male",
+  "contact": {
+    "email": "luka.petrovic@example.com"
+  },
+  "consents": {
+    "dataProcessing": true
+  }
+}

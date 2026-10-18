@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:sockets="http://www.mulesoft.org/schema/mule/sockets"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+        http://www.mulesoft.org/schema/mule/sockets http://www.mulesoft.org/schema/mule/sockets/current/mule-sockets.xsd">
+
+    <!-- Every flow without its own handler uses global-error-handler (error-handler.xml).
+         Generated correlation IDs are explicit UUIDs. -->
+    <configuration doc:name="Configuration"
+                   doc:description="Sets the global error handler and UUID correlation ID generation"
+                   defaultErrorHandler-ref="global-error-handler"
+                   correlationIdGeneratorExpression="#[uuid()]"/>
+
+    <!-- Overridden with -Denv=<name> (CloudHub: deployment property). -->
+    <global-property doc:name="Environment"
+                     doc:description="Selects config/${env}.yaml; defaults to local"
+                     name="env" value="local"/>
+
+    <configuration-properties doc:name="Common properties"
+                              doc:description="Settings shared by every environment"
+                              file="config/common.yaml"/>
+    <configuration-properties doc:name="Environment properties"
+                              doc:description="Environment-specific port and Process API location"
+                              file="config/${env}.yaml"/>
+
+    <http:listener-config name="http-listener-config"
+                          doc:name="HTTP listener"
+                          doc:description="Inbound HTTP endpoint; CloudHub terminates TLS at its ingress">
+        <http:listener-connection host="${http.host}" port="${http.port}"/>
+    </http:listener-config>
+
+    <apikit:config name="patient-exp-api-config"
+                   doc:name="APIkit router config"
+                   doc:description="Validates requests against patient-exp-api.raml"
+                   api="patient-exp-api.raml"
+                   outboundHeadersMapName="outboundHeaders"
+                   httpStatusVarName="httpStatus"/>
+
+    <!-- The only lower API of this application. Location per environment; HTTPS on CloudHub. -->
+    <http:request-config name="process-api-request-config"
+                         doc:name="Process API"
+                         doc:description="Outbound connection to patient-prc-api with explicit connect timeout"
+                         basePath="${processApi.basePath}">
+        <http:request-connection protocol="${processApi.protocol}"
+                                 host="${processApi.host}"
+                                 port="${processApi.port}"
+                                 maxConnections="${processApi.maxConnections}">
+            <http:client-socket-properties>
+                <sockets:tcp-client-socket-properties connectionTimeout="${processApi.connectTimeoutMillis}"/>
+            </http:client-socket-properties>
+        </http:request-connection>
+    </http:request-config>
+</mule>

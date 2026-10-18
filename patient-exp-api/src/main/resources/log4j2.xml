@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Every line carries the request's correlation ID (%X{correlationId}, set by the
+  Mule runtime for each event). Application loggers never write payloads or
+  patient fields; see request-context.xml.
+-->
+<Configuration status="WARN">
+    <Properties>
+        <Property name="pattern">%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5p [%t] [correlationId=%X{correlationId}] %c: %m%n</Property>
+    </Properties>
+    <Appenders>
+        <RollingFile name="file"
+                     fileName="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}patient-exp-api.log"
+                     filePattern="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}patient-exp-api-%i.log">
+            <PatternLayout pattern="${pattern}"/>
+            <SizeBasedTriggeringPolicy size="10 MB"/>
+            <DefaultRolloverStrategy max="10"/>
+        </RollingFile>
+    </Appenders>
+    <Loggers>
+        <!-- Connector internals are quiet unless something goes wrong. -->
+        <AsyncLogger name="org.mule.service.http" level="WARN"/>
+        <AsyncLogger name="org.mule.extension.http" level="WARN"/>
+        <AsyncLogger name="org.mule.extension.db" level="WARN"/>
+        <AsyncLogger name="org.mule.runtime.core.internal.processor.LoggerMessageProcessor" level="INFO"/>
+        <AsyncLogger name="com.acme.patient" level="INFO"/>
+
+        <AsyncRoot level="INFO">
+            <AppenderRef ref="file"/>
+        </AsyncRoot>
+    </Loggers>
+</Configuration>
