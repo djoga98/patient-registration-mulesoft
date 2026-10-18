@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <flow name="patient-prc-api-main"
+          doc:name="patient-prc-api-main"
+          doc:description="Receives /api/* requests, validates them against the RAML and routes them to an operation flow">
+        <http:listener config-ref="http-listener-config" path="${api.basePath}"
+                       doc:name="Listener /api/*"
+                       doc:description="Accepts registration requests; every response carries X-Correlation-ID">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers><![CDATA[#[(vars.outboundHeaders default {}) ++ {'X-Correlation-ID': vars.correlationId default correlationId}]]]></http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body><![CDATA[#[payload]]]></http:body>
+                <http:headers><![CDATA[#[(vars.outboundHeaders default {}) ++ {'X-Correlation-ID': vars.correlationId default correlationId}]]]></http:headers>
+            </http:error-response>
+        </http:listener>
+        <flow-ref name="start-request-context"
+                  doc:name="Start request context"
+                  doc:description="Captures the correlation ID and start time and logs the incoming request"/>
+        <apikit:router config-ref="patient-prc-api-config"
+                       doc:name="APIkit router"
+                       doc:description="Rejects requests that do not match the spec (400) and dispatches the rest"/>
+        <flow-ref name="log-response-sent"
+                  doc:name="Log response sent"
+                  doc:description="Logs the response status and request duration"/>
+    </flow>
+
+    <flow name="post:\patients:application\json:patient-prc-api-config"
+          doc:name="POST /patients"
+          doc:description="Registers a patient: business rules, normalisation, store via the System API">
+        <flow-ref name="register-patient"
+                  doc:name="Register patient"
+                  doc:description="Applies the business rules and stores the normalised record"/>
+        <set-variable variableName="httpStatus" value="#[201]"
+                      doc:name="Status 201"
+                      doc:description="Marks the response as Created"/>
+        <set-variable variableName="outboundHeaders" value="#[{ Location: '/api/patients/' ++ payload.patientId }]"
+                      doc:name="Location header"
+                      doc:description="Points the Location header at the new patient resource"/>
+    </flow>
+
+    <flow name="get:\patients\(patientId):patient-prc-api-config"
+          doc:name="GET /patients/{patientId}"
+          doc:description="Reads one patient through the System API in portal field names">
+        <set-variable variableName="patientId" value="#[attributes.uriParams.patientId]"
+                      doc:name="Patient ID"
+                      doc:description="Reads the patient ID from the URI"/>
+        <flow-ref name="get-patient-record"
+                  doc:name="Get patient record"
+                  doc:description="Reads the record from the System API, retrying transient failures"/>
+        <ee:transform doc:name="Record to patient"
+                      doc:description="Maps the System API record back to portal field names">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+import toPatient from dwl::PatientMapping
+output application/json
+---
+toPatient(payload)]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        <set-variable variableName="httpStatus" value="#[200]"
+                      doc:name="Status 200"
+                      doc:description="Marks the response as OK"/>
+    </flow>
+
+    <sub-flow name="register-patient"
+              doc:name="register-patient"
+              doc:description="Business rules (422), mapping to the record format, store, map back">
+        <set-variable variableName="today" value="#[dwl::RegistrationRules::todayIn(p('clinic.timeZone'))]"
+                      doc:name="Clinic date today"
+                      doc:description="Calendar date in the clinic time zone used by the rules and the category"/>
+        <choice doc:name="Business rules"
+                doc:description="Rejects registrations that break a business rule, before calling the System API">
+            <when expression="#[dwl::RegistrationRules::isBornInFuture(payload.dateOfBirth, vars.today)]"
+                  doc:name="Born in the future"
+                  doc:description="dateOfBirth is after today">
+                <raise-error type="APP:INVALID_BIRTH_DATE"
+                             description="dateOfBirth is in the future"
+                             doc:name="Raise INVALID_BIRTH_DATE"
+                             doc:description="Signals a future date of birth (422)"/>
+            </when>
+            <when expression="#[not dwl::RegistrationRules::hasDataProcessingConsent(payload)]"
+                  doc:name="No data-processing consent"
+                  doc:description="consents.dataProcessing is not true">
+                <raise-error type="APP:CONSENT_REQUIRED"
+                             description="consents.dataProcessing is not true"
+                             doc:name="Raise CONSENT_REQUIRED"
+                             doc:description="Signals missing data-processing consent (422)"/>
+            </when>
+        </choice>
+        <ee:transform doc:name="Registration to record"
+                      doc:description="Normalises names, email and phone, maps gender, calculates the category">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+import toRecord from dwl::PatientMapping
+output application/json
+---
+toRecord(payload, vars.today)]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        <flow-ref name="create-patient-record"
+                  doc:name="Create patient record"
+                  doc:description="Stores the record through the System API (never retried)"/>
+        <ee:transform doc:name="Record to patient"
+                      doc:description="Maps the stored System API record back to portal field names">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+import toPatient from dwl::PatientMapping
+output application/json
+---
+toPatient(payload)]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </sub-flow>
+</mule>

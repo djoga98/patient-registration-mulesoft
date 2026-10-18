@@ -1,0 +1,89 @@
+#%RAML 1.0
+title: Patient Registration Process API
+description: |
+  Validates registrations, applies the registration business rules, normalises
+  the data and maps between the portal field names and the record format of
+  the Patient System API (the only lower API this API calls).
+version: v1
+mediaType: application/json
+protocols: [ HTTP, HTTPS ]
+
+traits:
+  correlated: !include traits/correlated.raml
+
+uses:
+  pat: types/patient-types.raml
+
+/patients:
+  post:
+    displayName: Register a patient
+    is: [ correlated ]
+    body:
+      application/json:
+        type: pat.PatientRegistration
+        example: !include examples/patient-registration.json
+    responses:
+      201:
+        headers:
+          Location:
+            type: string
+            example: /api/patients/PAT-000123
+        body:
+          application/json:
+            type: pat.Patient
+            example: !include examples/patient.json
+      400:
+        description: The request does not match this specification.
+        body:
+          application/json:
+            type: pat.ErrorResponse
+      409:
+        description: A patient with the same normalised name and date of birth exists.
+        body:
+          application/json:
+            type: pat.ErrorResponse
+      422:
+        description: A business rule is broken (INVALID_BIRTH_DATE, CONSENT_REQUIRED).
+        body:
+          application/json:
+            type: pat.ErrorResponse
+            example: !include examples/error-consent-required.json
+      500:
+        body:
+          application/json:
+            type: pat.ErrorResponse
+      502:
+        description: The System API is unreachable or timed out.
+        body:
+          application/json:
+            type: pat.ErrorResponse
+
+  /{patientId}:
+    uriParameters:
+      patientId: pat.PatientId
+    get:
+      displayName: Read a patient
+      is: [ correlated ]
+      responses:
+        200:
+          body:
+            application/json:
+              type: pat.Patient
+              example: !include examples/patient.json
+        400:
+          body:
+            application/json:
+              type: pat.ErrorResponse
+        404:
+          body:
+            application/json:
+              type: pat.ErrorResponse
+        500:
+          body:
+            application/json:
+              type: pat.ErrorResponse
+        502:
+          description: The System API is unreachable, timed out or unavailable after retries.
+          body:
+            application/json:
+              type: pat.ErrorResponse

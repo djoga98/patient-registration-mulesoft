@@ -18,5 +18,23 @@
 
     <modules>
         <module>patient-sys-api</module>
+        <module>patient-prc-api</module>
     </modules>
+
+    <build>
+        <plugins>
+            <!-- The only thing under ./target here is MUnit's runtime cache (build-dependencies),
+                 shared by the modules. The reactor builds this POM last, while the last MUnit JVM
+                 can still hold file locks on Windows, so the root-level clean is skipped. Module
+                 builds clean their own target/ as usual. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>3.2.0</version>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

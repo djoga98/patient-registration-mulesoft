@@ -1,0 +1,16 @@
+#%RAML 1.0 Trait
+headers:
+  X-Correlation-ID:
+    type: string
+    required: false
+    description: Correlation ID shared by every hop of one request. Generated when absent.
+    example: 6f1c2a9e-0b7d-4c1e-9a52-3c4d5e6f7a8b
+responses:
+  200:
+    headers:
+      X-Correlation-ID:
+        type: string
+  201:
+    headers:
+      X-Correlation-ID:
+        type: string

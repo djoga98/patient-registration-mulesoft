@@ -1,0 +1,8 @@
+# MUnit only. Every call to the System API is mocked; nothing listens on 18183.
+http:
+  port: "18082"
+
+systemApi:
+  protocol: "HTTP"
+  host: "localhost"
+  port: "18183"

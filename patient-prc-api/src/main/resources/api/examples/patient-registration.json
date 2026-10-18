@@ -1,0 +1,15 @@
+{
+  "firstName": "  ana ",
+  "lastName": "KOVAČ",
+  "dateOfBirth": "1985-04-12",
+  "gender": "female",
+  "contact": {
+    "email": "Ana.Kovac@Example.com",
+    "phone": "+387 61 111-222"
+  },
+  "consents": {
+    "dataProcessing": true,
+    "smsReminders": false
+  },
+  "channel": "PORTAL"
+}

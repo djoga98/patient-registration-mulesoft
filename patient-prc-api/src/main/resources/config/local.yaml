@@ -1,0 +1,7 @@
+http:
+  port: "8082"
+
+systemApi:
+  protocol: "HTTP"
+  host: "localhost"
+  port: "8083"

@@ -1,0 +1,23 @@
+# Settings shared by every environment. Environment files must not repeat these keys.
+http:
+  host: "0.0.0.0"
+
+api:
+  basePath: "/api/*"
+
+clinic:
+  # "Today" for the future-birth-date rule and the age category.
+  timeZone: "Europe/Sarajevo"
+
+systemApi:
+  basePath: "/api"
+  # Explicit timeouts for every call to the System API (milliseconds).
+  connectTimeoutMillis: "3000"
+  responseTimeoutMillis: "10000"
+  maxConnections: "20"
+
+retry:
+  get:
+    # GET only: 1 attempt + 2 retries = at most 3 attempts.
+    maxRetries: "2"
+    delayMillis: "500"

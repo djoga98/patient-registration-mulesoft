@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "CONSENT_REQUIRED",
+    "message": "Consent to data processing is required for registration.",
+    "correlationId": "6f1c2a9e-0b7d-4c1e-9a52-3c4d5e6f7a8b",
+    "timestamp": "2026-10-15T10:21:07Z"
+  }
+}

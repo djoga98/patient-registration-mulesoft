@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- Unit tests of the DataWeave modules in src/main/resources/dwl. Dates are fixed: no dependency on the clock. -->
+    <munit:config name="dataweave-modules-test-suite.xml"/>
+
+    <munit:test name="names-are-trimmed-and-capitalised-unicode-safely"
+                description="Trim (including no-break spaces); first letter upper case, the rest lower case, for non-ASCII letters too">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import normaliseName from dwl::PatientMapping
+output application/json
+---
+[
+    normaliseName("  ana "),
+    normaliseName("KOVAČ"),
+    normaliseName("kovač"),
+    normaliseName("ANA"),
+    normaliseName(" petrović "),
+    normaliseName("đorđe"),
+    normaliseName("ČEDOMIR"),
+    normaliseName("x"),
+    normaliseName("ana-marija")
+]]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]"
+                                       expected="#[['Ana', 'Kovač', 'Kovač', 'Ana', 'Petrović', 'Đorđe', 'Čedomir', 'X', 'Ana-marija']]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="email-is-lower-cased-and-phone-is-compacted"
+                description="Email lower case; phone without spaces, dashes and brackets; absent or blank phone becomes null">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import normaliseEmail, normalisePhone from dwl::PatientMapping
+output application/json
+---
+{
+    email:  normaliseEmail("Ana.Kovac@Example.com"),
+    phones: [ normalisePhone("+387 61 111-222"), normalisePhone("(065) 222 333"), normalisePhone("+387 66 444 555") ],
+    absent: [ normalisePhone(null), normalisePhone("   "), normalisePhone(" - ( ) ") ]
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload.email]" expected="#['ana.kovac@example.com']"/>
+            <munit-tools:assert-equals actual="#[payload.phones]" expected="#[['+38761111222', '065222333', '+38766444555']]"/>
+            <munit-tools:assert-equals actual="#[payload.absent]" expected="#[[null, null, null]]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="age-respects-birthday-and-leap-day-boundaries"
+                description="Completed years: birthday reached on the day itself; 29 February counts from 1 March in non-leap years">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import ageOn from dwl::RegistrationRules
+output application/json
+---
+{
+    dayBeforeBirthday: ageOn(|2008-10-16|, |2026-10-15|),
+    onBirthday:        ageOn(|2008-10-15|, |2026-10-15|),
+    dayAfterBirthday:  ageOn(|2008-10-14|, |2026-10-15|),
+    bornToday:         ageOn(|2026-10-15|, |2026-10-15|),
+    leapDayOnFeb28:    ageOn(|2008-02-29|, |2026-02-28|),
+    leapDayOnMar01:    ageOn(|2008-02-29|, |2026-03-01|),
+    leapDayInLeapYear: ageOn(|2008-02-29|, |2028-02-29|),
+    case1Ana:          ageOn(|1985-04-12|, |2026-10-15|)
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[{
+                dayBeforeBirthday: 17, onBirthday: 18, dayAfterBirthday: 18, bornToday: 0,
+                leapDayOnFeb28: 17, leapDayOnMar01: 18, leapDayInLeapYear: 20, case1Ana: 41 }]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="category-boundaries-are-18-and-65"
+                description="Under 18 MINOR, 18 to 64 ADULT, 65 and over SENIOR">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import categoryFor from dwl::RegistrationRules
+output application/json
+---
+[0, 17, 18, 64, 65, 101] map categoryFor($)]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[['MINOR', 'MINOR', 'ADULT', 'ADULT', 'SENIOR', 'SENIOR']]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="business-rules-birth-date-and-consent"
+                description="Today is allowed, tomorrow is in the future; only consent true counts">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import isBornInFuture, hasDataProcessingConsent from dwl::RegistrationRules
+output application/json
+---
+{
+    today:      isBornInFuture("2026-10-15", |2026-10-15|),
+    tomorrow:   isBornInFuture("2026-10-16", |2026-10-15|),
+    yesterday:  isBornInFuture("2026-10-14", |2026-10-15|),
+    consentTrue:  hasDataProcessingConsent({ consents: { dataProcessing: true } }),
+    consentFalse: hasDataProcessingConsent({ consents: { dataProcessing: false } })
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]"
+                                       expected="#[{ today: false, tomorrow: true, yesterday: false, consentTrue: true, consentFalse: false }]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="today-follows-the-clinic-time-zone"
+                description="todayIn returns the calendar date of the given zone, which can differ from UTC around midnight">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import todayIn from dwl::RegistrationRules
+output application/json
+---
+{
+    sarajevo: todayIn("Europe/Sarajevo") == ((now() >> "Europe/Sarajevo") as Date),
+    isDate: todayIn("UTC") is Date
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[{ sarajevo: true, isDate: true }]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="registration-maps-to-the-assignment-record"
+                description="Case 1 maps to exactly the record of the assignment's step 4">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import toRecord from dwl::PatientMapping
+output application/json
+---
+toRecord(readUrl("classpath://samples/registration-case1-ana.json", "application/json"), |2026-10-15|)]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload orderBy $$]"
+                                       expected="#[readUrl('classpath://samples/expected-record-case1.json', 'application/json') orderBy $$]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="record-maps-back-to-the-assignment-response"
+                description="The stored record maps to exactly the Process response of step 5; a missing phone stays missing">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import toPatient from dwl::PatientMapping
+output application/json
+var record = readUrl("classpath://samples/system-record-case1.json", "application/json")
+---
+{
+    withPhone: toPatient(record),
+    withoutPhone: toPatient(record - "phone")
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload.withPhone orderBy $$]"
+                                       expected="#[readUrl('classpath://samples/expected-patient-case1.json', 'application/json') orderBy $$]"/>
+            <munit-tools:assert-equals actual="#[payload.withoutPhone.contact]" expected="#[{ email: 'ana.kovac@example.com' }]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="gender-maps-both-ways"
+                description="female/male/other map to F/M/O and back">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import sexByGender, genderBySex from dwl::PatientMapping
+output application/json
+---
+{
+    there: ["female", "male", "other"] map sexByGender[$],
+    back:  ["F", "M", "O"] map genderBySex[$]
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[{ there: ['F', 'M', 'O'], back: ['female', 'male', 'other'] }]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="downstream-responses-keep-their-meaning"
+                description="Known 4xx codes propagate; unknown bodies, 5xx and odd statuses become DOWNSTREAM_ERROR; 2xx is not an error">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import errorCodeFor from dwl::Downstream
+output application/json
+fun body(code) = { error: { code: code, message: "m", correlationId: "c", timestamp: "t" } }
+---
+{
+    created:    errorCodeFor(201, {}),
+    ok:         errorCodeFor(200, {}),
+    notFound:   errorCodeFor(404, body("PATIENT_NOT_FOUND")),
+    duplicate:  errorCodeFor(409, body("DUPLICATE_PATIENT")),
+    birthDate:  errorCodeFor(422, body("INVALID_BIRTH_DATE")),
+    consent:    errorCodeFor(422, body("CONSENT_REQUIRED")),
+    badRequest: errorCodeFor(400, body("BAD_REQUEST")),
+    route404:   errorCodeFor(404, body("RESOURCE_NOT_FOUND")),
+    html503:    errorCodeFor(503, "<html>down</html>"),
+    text404:    errorCodeFor(404, "Not Found"),
+    server500:  errorCodeFor(500, body("INTERNAL_ERROR")),
+    mismatched: errorCodeFor(409, body("PATIENT_NOT_FOUND")),
+    unauth:     errorCodeFor(401, null)
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload orderBy $$]" expected="#[{
+                created: null, ok: null, notFound: 'PATIENT_NOT_FOUND', duplicate: 'DUPLICATE_PATIENT',
+                birthDate: 'INVALID_BIRTH_DATE', consent: 'CONSENT_REQUIRED', badRequest: 'BAD_REQUEST',
+                route404: 'DOWNSTREAM_ERROR', html503: 'DOWNSTREAM_ERROR', text404: 'DOWNSTREAM_ERROR',
+                server500: 'DOWNSTREAM_ERROR', mismatched: 'DOWNSTREAM_ERROR', unauth: 'DOWNSTREAM_ERROR' } orderBy $$]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="api-errors-maps-http-and-retry-errors-to-downstream-error"
+                description="Connectivity, timeout, 503 and exhausted retries all answer 502 DOWNSTREAM_ERROR">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import codeFor, statusFor from dwl::ApiErrors
+output application/json
+---
+[
+    { namespace: "HTTP", identifier: "CONNECTIVITY" },
+    { namespace: "HTTP", identifier: "TIMEOUT" },
+    { namespace: "HTTP", identifier: "SERVICE_UNAVAILABLE" },
+    { namespace: "MULE", identifier: "RETRY_EXHAUSTED" },
+    { namespace: "APP",  identifier: "INVALID_BIRTH_DATE" },
+    { namespace: "APP",  identifier: "CONSENT_REQUIRED" }
+] map { code: codeFor($), status: statusFor(codeFor($)) }]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[[
+                { code: 'DOWNSTREAM_ERROR', status: 502 }, { code: 'DOWNSTREAM_ERROR', status: 502 },
+                { code: 'DOWNSTREAM_ERROR', status: 502 }, { code: 'DOWNSTREAM_ERROR', status: 502 },
+                { code: 'INVALID_BIRTH_DATE', status: 422 }, { code: 'CONSENT_REQUIRED', status: 422 } ]]"/>
+        </munit:validation>
+    </munit:test>
+</mule>
