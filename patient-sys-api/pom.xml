@@ -66,6 +66,10 @@
                 <configuration>
                     <runtimeVersion>${app.runtime}</runtimeVersion>
                     <runtimeProduct>MULE_EE</runtimeProduct>
+                    <!-- UTF-8 regardless of the build machine (CloudHub runs UTF-8); Windows defaults to a legacy code page. -->
+                    <argLines>
+                        <argLine>-Dfile.encoding=UTF-8</argLine>
+                    </argLines>
                     <systemPropertyVariables>
                         <env>test</env>
                         <!-- The test secure file holds no ciphertext; this key never decrypts anything. -->
