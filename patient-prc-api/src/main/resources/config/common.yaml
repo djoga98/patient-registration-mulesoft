@@ -13,7 +13,7 @@ systemApi:
   basePath: "/api"
   # Explicit timeouts for every call to the System API (milliseconds).
   connectTimeoutMillis: "3000"
-  responseTimeoutMillis: "10000"
+  responseTimeoutMillis: "5000"
   maxConnections: "20"
 
 retry:
