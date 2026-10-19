@@ -1,18 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Every line carries the request's correlation ID (%X{correlationId}, set by the
-  Mule runtime for each event). Application loggers never write payloads or
+  Structured JSON logging: one JSON object per line.
+
+    timestamp      ISO 8601 with offset
+    level, logger, thread
+    app            this application
+    correlationId  the request's correlation ID (%X{correlationId}, set by the Mule
+                   runtime for each event; empty only for container lines outside an event)
+    message        the log message as a JSON string. Application events
+                   (logger com.acme.patient.*) are themselves single-line JSON built by
+                   dwl/LogEvent.dwl, e.g. {"event":"response.sent","correlationId":"…","status":201}
+    exception      only when the line carries a throwable
+
+  Built with PatternLayout and %enc{…}{JSON} escaping, so it needs no extra library and
+  works the same on every Mule 4 runtime. Application loggers never write payloads or
   patient fields; see request-context.xml.
 -->
 <Configuration status="WARN">
-    <Properties>
-        <Property name="pattern">%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5p [%t] [correlationId=%X{correlationId}] %c: %m%n</Property>
-    </Properties>
     <Appenders>
         <RollingFile name="file"
                      fileName="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}patient-sys-api.log"
                      filePattern="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}patient-sys-api-%i.log">
-            <PatternLayout pattern="${pattern}"/>
+            <PatternLayout alwaysWriteExceptions="false">
+                <Pattern>{"timestamp":"%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}","level":"%p","logger":"%enc{%c}{JSON}","thread":"%enc{%t}{JSON}","app":"patient-sys-api","correlationId":"%enc{%X{correlationId}}{JSON}","message":"%enc{%m}{JSON}"%notEmpty{,"exception":"%enc{%ex}{JSON}"}}%n</Pattern>
+            </PatternLayout>
             <SizeBasedTriggeringPolicy size="10 MB"/>
             <DefaultRolloverStrategy max="10"/>
         </RollingFile>

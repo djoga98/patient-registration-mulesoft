@@ -52,7 +52,7 @@ toInsertParameters(payload)]]]></db:input-parameters>
                       doc:name="Generated patient ID"
                       doc:description="Keeps the database-generated PAT- identifier"/>
         <logger level="INFO" category="com.acme.patient.sys"
-                message="#['Patient stored patientId=$(vars.patientId)']"
+                message="#[dwl::LogEvent::event('patient.stored', vars.correlationId, { patientId: vars.patientId })]"
                 doc:name="Log patient stored"
                 doc:description="Logs the generated patient ID (no patient data)"/>
         <flow-ref name="find-patient-by-id"

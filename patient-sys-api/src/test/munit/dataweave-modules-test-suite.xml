@@ -128,4 +128,33 @@ output application/json
             <munit-tools:assert-equals actual="#[payload.withoutPhone.phone?]" expected="#[false]"/>
         </munit:validation>
     </munit:test>
+
+    <munit:test name="log-event-is-a-single-line-json-object"
+                description="LogEvent.event: event name and correlation ID first, then the fields, on one line">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import event, elapsedMillis from dwl::LogEvent
+output application/json
+var message = event("response.sent", "cid-1", { status: 201, path: "/api/patients" })
+---
+{
+    message: message,
+    parsed: read(message, "application/json"),
+    oneLine: not (message contains "\n"),
+    elapsedIsNonNegative: elapsedMillis(now() as Number { unit: "milliseconds" }) >= 0
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload.oneLine]" expected="#[true]"/>
+            <munit-tools:assert-equals actual="#[payload.parsed]"
+                                       expected="#[{ event: 'response.sent', correlationId: 'cid-1', status: 201, path: '/api/patients' }]"/>
+            <munit-tools:assert-equals actual="#[keysOf(payload.parsed) map ($ as String)]"
+                                       expected="#[['event', 'correlationId', 'status', 'path']]"/>
+            <munit-tools:assert-equals actual="#[payload.elapsedIsNonNegative]" expected="#[true]"/>
+        </munit:validation>
+    </munit:test>
 </mule>

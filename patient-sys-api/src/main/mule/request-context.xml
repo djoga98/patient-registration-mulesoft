@@ -19,7 +19,8 @@
       asserts that equality.
 
       Log lines never contain payloads or patient fields: method, path (which may
-      carry a patient ID), status and timings only.
+      carry a patient ID), status and timings only. Each message is a structured JSON
+      event built by dwl/LogEvent.dwl.
     -->
 
     <sub-flow name="start-request-context"
@@ -40,7 +41,7 @@ now() as Number { unit: "milliseconds" }]]></ee:set-variable>
             </ee:variables>
         </ee:transform>
         <logger level="INFO" category="com.acme.patient.sys"
-                message="#['Request received method=$(attributes.method) path=$(attributes.requestPath)']"
+                message="#[dwl::LogEvent::event('request.received', vars.correlationId, { method: attributes.method, path: attributes.requestPath })]"
                 doc:name="Log request received"
                 doc:description="Logs method and path of the incoming request"/>
     </sub-flow>
@@ -49,7 +50,7 @@ now() as Number { unit: "milliseconds" }]]></ee:set-variable>
               doc:name="log-response-sent"
               doc:description="Logs the response status and the request duration">
         <logger level="INFO" category="com.acme.patient.sys"
-                message="#['Response sent status=$(vars.httpStatus default 200) durationMs=$((now() as Number { unit: 'milliseconds' }) - (vars.requestStartMillis default 0))']"
+                message="#[dwl::LogEvent::event('response.sent', vars.correlationId, { status: vars.httpStatus default 200, durationMs: dwl::LogEvent::elapsedMillis(vars.requestStartMillis) })]"
                 doc:name="Log response sent"
                 doc:description="Logs status and duration of a successful request"/>
     </sub-flow>

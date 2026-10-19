@@ -244,13 +244,27 @@ for SQL failures; the live failure-mode script asserts it for an outage.
 - Each lower call sends it **explicitly** as `X-Correlation-ID` (`sendCorrelationId="NEVER"`
   plus an explicit header), and Process/System adopt it the same way. Every response
   returns it in the header, and every error body contains it.
-- Every log line contains it: the log4j2 pattern prints `%X{correlationId}`, which Mule
+- Every log line contains it: the log4j2 layout prints `%X{correlationId}`, which Mule
   sets per event. The HTTP listener adopts an incoming `X-Correlation-ID` as the event's
   correlation ID. MUnit asserts that `correlationId == vars.correlationId` in all three
   apps, so the logged value and the propagated value are provably the same.
-- Logged per request: `Request received method path`, `Calling <lower> API method path`,
-  `<lower> API responded status durationMs`, `Response sent status durationMs`, and on
-  errors `code` plus the Mule error type (WARN for 4xx, ERROR for 5xx).
+- **Structured JSON logging.** Each line is one JSON object (`timestamp`, `level`,
+  `logger`, `thread`, `app`, `correlationId`, `message`, and `exception` when there is
+  one), written by a log4j2 `PatternLayout` with `%enc{…}{JSON}` escaping. That needs no
+  extra library and behaves the same on every Mule 4 runtime. Application messages are
+  JSON events themselves, built by `dwl/LogEvent.dwl`:
+  ```json
+  {"timestamp":"2026-10-19T19:47:10.460+02:00","level":"INFO","logger":"com.acme.patient.prc","thread":"…","app":"patient-prc-api","correlationId":"ab7d6be4-…","message":"{\"event\": \"downstream.response\",\"correlationId\": \"ab7d6be4-…\",\"target\": \"system-api\",\"status\": 201,\"durationMs\": 65}"}
+  ```
+  The message is structured, not just the layout, because CloudHub 2.0 removes file
+  appenders and collects logs with its own appender. The message is what reaches
+  Runtime Manager unchanged, so the event fields and the correlation ID survive there.
+- Events per request: `request.received` (method, path), `downstream.request` (target,
+  method, path), `downstream.response` (target, status, durationMs), `response.sent`
+  (status, durationMs, and on errors `code` plus the Mule `errorType`; WARN for 4xx,
+  ERROR for 5xx). The System API also logs `patient.stored` (patientId).
+  `node scripts/log-events.js check <log>` validates a log file and
+  `… count <log> <correlationId> <event> [field=value]` queries it; the E2E scripts use both.
 - **No patient data in logs.** No payloads or fields are logged, only patient IDs.
   Exception logging is off in the error handler (`logException="false"`), because
   driver messages quote the rejected values: PostgreSQL's
@@ -389,8 +403,12 @@ Known limitations:
   "McDonald" or "van der Berg". This follows the specification.
 - **Shared code is copied, not packaged**: `ApiErrors.dwl`, `Downstream.dwl`, the error
   handler and the request context exist in each app.
-- **Local logs** go to `$MULE_HOME/logs/<app>.log` (standard Mule template). On CloudHub 2.0
-  the log forwarding behaviour with a custom `log4j2.xml` has not been verified.
+- **Local logs** go to `$MULE_HOME/logs/<app>.log` (standard Mule template). MuleSoft's
+  CloudHub 2.0 logging page says file appenders are removed by the platform and that
+  Runtime Manager keeps showing runtime and application logs with a custom `log4j2.xml`.
+  The JSON line layout therefore applies to local logs and to any asynchronous
+  third-party appender added later. On CloudHub the structured part is the JSON event
+  message. Not verified on CloudHub.
 
 With more time:
 
@@ -400,6 +418,6 @@ With more time:
   POST safely retryable and is a natural next step given the no-retry rule.
 - Client ID enforcement on the Process and System APIs (API Manager), and mTLS or
   private-space ingress for the System API.
-- Structured JSON logging and OpenTelemetry tracing across the hops.
+- OpenTelemetry tracing across the hops.
 - A Testcontainers-based integration suite in CI instead of the local scripts.
 - The search endpoint (`GET /api/patients?lastName=`) through all layers.

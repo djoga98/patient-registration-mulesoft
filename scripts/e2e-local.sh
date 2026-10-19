@@ -12,7 +12,8 @@
 # Checks:
 #   1. The nine sample cases (Postman collection, run with Newman).
 #   2. What was persisted: three normalised rows, NULL phone for case 2.
-#   3. The application logs: every app log line has a correlation ID, no patient data.
+#   3. The application logs written during this run: every line is JSON, every
+#      application event carries the correlation ID, no line contains patient data.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,6 +24,12 @@ psql() { docker exec -i patient-registration-postgres psql -U patient_owner -d p
 for port in 8081 8082 8083; do
     curl -s -o /dev/null --max-time 5 "http://localhost:$port/api/patients/PAT-000000" \
         || { echo "nothing answers on port $port; start the apps first" >&2; exit 1; }
+done
+
+# Log lines written from here on are this run's (earlier runs may have used another format).
+declare -A log_start
+for app in patient-exp-api patient-prc-api patient-sys-api; do
+    log_start[$app]=$(( $( (cat "$log_dir/$app.log" 2>/dev/null || true) | wc -l) + 1 ))
 done
 
 rows=$(psql -c "SELECT count(*) FROM patient")
@@ -52,12 +59,14 @@ echo "PASS: rows match the expected normalised records"
 echo "== 3. logs"
 pii='Ana|Kova|Luka|Petrovi|Milena|Jovi|Ivan|Mari|Sara|Ili|Petar|Babi|@example\.com|@Example\.com|111-222|61111222|222 333|222333|444 555|1985-04-12|2012-09-03|1950-01-20|1978-11-30|2030-05-01|1992-06-15'
 status=0
+sleep 2   # application loggers are asynchronous
 for app in patient-exp-api patient-prc-api patient-sys-api; do
     f="$log_dir/$app.log"
-    lines=$(grep -c "com.acme.patient" "$f" || true)
-    missing=$(grep "com.acme.patient" "$f" | grep -c "correlationId=\]" || true)
-    leaks=$(grep -cE "$pii" "$f" || true)
-    echo "$app: $lines application log lines, $missing without correlation ID, $leaks with patient data"
-    [[ "$lines" -gt 0 && "$missing" == "0" && "$leaks" == "0" ]] || status=1
+    echo -n "$app: "
+    node scripts/log-events.js check "$f" "${log_start[$app]}" || status=1
+    leaks=$(tail -n +"${log_start[$app]}" "$f" | grep -cE "$pii" || true)
+    echo "$app: $leaks lines with patient data"
+    [[ "$leaks" == "0" ]] || status=1
 done
-[[ $status == 0 ]] && echo "PASS: logs carry correlation IDs and no patient data" || { echo "FAIL: log checks" >&2; exit 1; }
+[[ $status == 0 ]] && echo "PASS: JSON log lines, correlation IDs on every application event, no patient data" \
+    || { echo "FAIL: log checks" >&2; exit 1; }

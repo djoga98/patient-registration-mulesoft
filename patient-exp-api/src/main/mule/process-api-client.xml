@@ -27,7 +27,7 @@
               doc:name="create-patient"
               doc:description="POST the registration to the Process API once, without retries">
         <logger level="INFO" category="com.acme.patient.exp"
-                message="#['Calling Process API method=POST path=$(p(&quot;processApi.basePath&quot;))/patients']"
+                message="#[dwl::LogEvent::event('downstream.request', vars.correlationId, { target: 'process-api', method: 'POST', path: p('processApi.basePath') ++ '/patients' })]"
                 doc:name="Log Process API call"
                 doc:description="Logs the outbound call (no payload)"/>
         <set-variable variableName="downstreamStartMillis" value="#[now() as Number { unit: 'milliseconds' }]"
@@ -56,7 +56,7 @@
                           doc:name="Retry transient failures"
                           doc:description="Retries connection errors, timeouts and 503 only; at most 3 attempts">
             <logger level="INFO" category="com.acme.patient.exp"
-                    message="#['Calling Process API method=GET path=$(p(&quot;processApi.basePath&quot;))/patients/$(vars.patientId)']"
+                    message="#[dwl::LogEvent::event('downstream.request', vars.correlationId, { target: 'process-api', method: 'GET', path: p('processApi.basePath') ++ '/patients/' ++ vars.patientId })]"
                     doc:name="Log Process API call"
                     doc:description="Logs each outbound attempt (patient ID only)"/>
             <set-variable variableName="downstreamStartMillis" value="#[now() as Number { unit: 'milliseconds' }]"
@@ -84,7 +84,7 @@
               doc:name="handle-process-api-response"
               doc:description="Keeps the meaning of Process API errors: 404/409/422/400 stay, everything else is 502">
         <logger level="INFO" category="com.acme.patient.exp"
-                message="#['Process API responded status=$(attributes.statusCode) durationMs=$((now() as Number { unit: &quot;milliseconds&quot; }) - vars.downstreamStartMillis)']"
+                message="#[dwl::LogEvent::event('downstream.response', vars.correlationId, { target: 'process-api', status: attributes.statusCode, durationMs: dwl::LogEvent::elapsedMillis(vars.downstreamStartMillis) })]"
                 doc:name="Log Process API response"
                 doc:description="Logs the lower API status and call duration"/>
         <set-variable variableName="downstreamErrorCode"

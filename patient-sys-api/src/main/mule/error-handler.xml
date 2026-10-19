@@ -61,14 +61,14 @@ qualifiedName(error.errorType)]]></ee:set-variable>
                               doc:name="5xx"
                               doc:description="Unexpected or downstream failure">
                             <logger level="ERROR" category="com.acme.patient.sys"
-                                    message="#['Response sent status=$(vars.httpStatus) code=$(vars.errorCode) errorType=$(vars.errorTypeName) durationMs=$((now() as Number { unit: 'milliseconds' }) - (vars.requestStartMillis default 0))']"
+                                    message="#[dwl::LogEvent::event('response.sent', vars.correlationId default correlationId, { status: vars.httpStatus, code: vars.errorCode, errorType: vars.errorTypeName, durationMs: dwl::LogEvent::elapsedMillis(vars.requestStartMillis) })]"
                                     doc:name="Log server error"
                                     doc:description="Logs status, error code and Mule error type of a failed request"/>
                         </when>
                         <otherwise doc:name="4xx"
                                    doc:description="Request rejected by validation or a business condition">
                             <logger level="WARN" category="com.acme.patient.sys"
-                                    message="#['Response sent status=$(vars.httpStatus) code=$(vars.errorCode) errorType=$(vars.errorTypeName) durationMs=$((now() as Number { unit: 'milliseconds' }) - (vars.requestStartMillis default 0))']"
+                                    message="#[dwl::LogEvent::event('response.sent', vars.correlationId default correlationId, { status: vars.httpStatus, code: vars.errorCode, errorType: vars.errorTypeName, durationMs: dwl::LogEvent::elapsedMillis(vars.requestStartMillis) })]"
                                     doc:name="Log client error"
                                     doc:description="Logs status, error code and Mule error type of a rejected request"/>
                         </otherwise>

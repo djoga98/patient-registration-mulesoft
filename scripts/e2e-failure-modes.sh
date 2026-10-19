@@ -36,6 +36,10 @@ call() { # method url [body-file] -> sets status, response
     local out; out=$(curl "${args[@]}")
     status=${out##*$'\n'}; response=${out%$'\n'*}; last_cid=$cid
 }
+events() { # app event [field=value ...] -> how many of that app's events the last call logged
+    local app="$1"; shift
+    node "$root/scripts/log-events.js" count "$log_dir/$app.log" "$last_cid" "$@"
+}
 wait_for() { # url expected-status
     for _ in $(seq 1 60); do
         [[ "$(curl -s -o /dev/null -w '%{http_code}' "$1")" == "$2" ]] && return 0; sleep 2
@@ -57,13 +61,15 @@ rm -f "$mule_base/apps/patient-sys-api-anchor.txt"          # undeploys the app
 for _ in $(seq 1 60); do [[ -d "$mule_base/apps/patient-sys-api" ]] || break; sleep 1; done
 sleep 3
 call GET "$exp/$patient_id";   check "GET with System API down" 502 "$status" "$response"
-attempts=$(grep "correlationId=$last_cid" "$log_dir/patient-prc-api.log" | grep -c "Calling System API method=GET" || true)
-calls=$(grep "correlationId=$last_cid" "$log_dir/patient-exp-api.log" | grep -c "Calling Process API method=GET" || true)
+sleep 2   # application loggers are asynchronous
+attempts=$(events patient-prc-api downstream.request target=system-api method=GET)
+calls=$(events patient-exp-api downstream.request target=process-api method=GET)
 [[ "$attempts" == 3 && "$calls" == 1 ]] \
     && echo "PASS: Process API made 3 GET attempts, Experience API 1 call" \
     || { echo "FAIL: GET attempts prc=$attempts exp=$calls (expected 3 and 1)"; fail=1; }
 call POST "$exp" "$body";      check "POST with System API down" 502 "$status" "$response"
-attempts=$(grep "correlationId=$last_cid" "$log_dir/patient-prc-api.log" | grep -c "Calling System API method=POST" || true)
+sleep 2
+attempts=$(events patient-prc-api downstream.request target=system-api method=POST)
 [[ "$attempts" == 1 ]] && echo "PASS: POST attempted once (never retried)" || { echo "FAIL: POST attempts=$attempts"; fail=1; }
 
 cp "$root/patient-sys-api/target/patient-sys-api-1.0.0-mule-application.jar" "$mule_base/apps/patient-sys-api.jar"

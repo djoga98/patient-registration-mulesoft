@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- MUnit: same pattern as the application, written to the console. -->
+<!-- MUnit: the application's JSON line layout (see src/main/resources/log4j2.xml), written to the console. -->
 <Configuration status="WARN">
     <Appenders>
         <Console name="console" target="SYSTEM_OUT">
-            <PatternLayout pattern="%d{HH:mm:ss.SSS} %-5p [correlationId=%X{correlationId}] %c: %m%n"/>
+            <PatternLayout alwaysWriteExceptions="false">
+                <Pattern>{"timestamp":"%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}","level":"%p","logger":"%enc{%c}{JSON}","thread":"%enc{%t}{JSON}","app":"patient-prc-api","correlationId":"%enc{%X{correlationId}}{JSON}","message":"%enc{%m}{JSON}"%notEmpty{,"exception":"%enc{%ex}{JSON}"}}%n</Pattern>
+            </PatternLayout>
         </Console>
     </Appenders>
     <Loggers>
