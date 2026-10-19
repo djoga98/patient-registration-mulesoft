@@ -47,3 +47,7 @@ ALTER SEQUENCE patient_id_seq OWNED BY patient.patient_id;
 COMMENT ON TABLE  patient                IS 'Registered clinic patients (record format of patient-sys-api).';
 COMMENT ON COLUMN patient.registered_at  IS 'Registration instant; stored as timestamptz, served in UTC.';
 COMMENT ON COLUMN patient.source         IS 'Registration channel, e.g. PORTAL.';
+
+-- Search by family name (GET /api/patients?family_name=). uq_patient_identity leads
+-- with given_name, so it cannot serve this lookup.
+CREATE INDEX IF NOT EXISTS ix_patient_family_name ON patient (family_name);

@@ -114,6 +114,27 @@ const cases = [
         n: 9, method: 'GET', name: 'PAT-999999 -> 404 PATIENT_NOT_FOUND',
         path: 'PAT-999999',
         tests: expectError(404, 'PATIENT_NOT_FOUND')
+    },
+    // Bonus: search by last name, through all three layers.
+    {
+        n: 10, method: 'GET', name: 'search lastName=KOVAČ -> 200, only Ana Kovač (case 4 was rejected)',
+        query: { lastName: 'KOVAČ' },
+        tests: [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "const list = pm.response.json();",
+            "pm.test('exactly one match', () => pm.expect(list).to.have.lengthOf(1));",
+            "pm.test('the patient of case 1', () => pm.expect(list[0].patientId).to.eql(pm.collectionVariables.get('case1PatientId')));",
+            "pm.test('portal view', () => pm.expect(list[0].fullName).to.eql('Ana Kovač'));",
+            "pm.test('age', () => pm.expect(list[0].age).to.eql(ageOn('1985-04-12')));"
+        ]
+    },
+    {
+        n: 11, method: 'GET', name: 'search lastName=Nepoznat -> 200, empty array',
+        query: { lastName: 'Nepoznat' },
+        tests: [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "pm.test('empty array', () => pm.expect(pm.response.json()).to.eql([]));"
+        ]
     }
 ];
 
@@ -146,9 +167,11 @@ const item = cases.map((c) => {
             ...(c.body ? [{ key: 'Content-Type', value: 'application/json', type: 'text' }] : [])
         ],
         url: {
-            raw: `{{baseUrl}}/api/patients${c.path ? '/' + c.path : ''}`,
+            raw: `{{baseUrl}}/api/patients${c.path ? '/' + c.path : ''}` +
+                (c.query ? '?' + Object.entries(c.query).map(([k, v]) => `${k}=${v}`).join('&') : ''),
             host: ['{{baseUrl}}'],
-            path: ['api', 'patients', ...(c.path ? [c.path] : [])]
+            path: ['api', 'patients', ...(c.path ? [c.path] : [])],
+            ...(c.query ? { query: Object.entries(c.query).map(([key, value]) => ({ key, value })) } : {})
         }
     };
     if (c.body) {
@@ -165,9 +188,10 @@ const collection = {
     info: {
         name: 'Patient Registration APIs: sample cases',
         description: [
-            'The nine sample cases of the assignment, against the Experience API.',
-            'Run in order (case 4 is a duplicate of case 1; case 8 reads the patient created by case 1)',
-            'against an empty patient table. Select the "local" or "cloudhub" environment for {{baseUrl}}.'
+            'The nine sample cases of the assignment, against the Experience API, followed by two',
+            'searches by last name (bonus endpoint). Run in order (case 4 is a duplicate of case 1;',
+            'cases 8 and 10 read the patient created by case 1) against an empty patient table.',
+            'Select the "local" or "cloudhub" environment for {{baseUrl}}.'
         ].join('\n'),
         schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'
     },

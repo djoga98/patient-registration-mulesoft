@@ -22,10 +22,11 @@
         <http:request-connection host="localhost" port="${http.port}"/>
     </http:request-config>
 
-    <!-- Sends payload to the API. Inputs: vars.method, vars.path, vars.requestHeaders. -->
+    <!-- Sends payload to the API. Inputs: vars.method, vars.path, vars.requestHeaders, vars.queryParams. -->
     <sub-flow name="call-sys-api">
         <http:request config-ref="test-http-client" method="#[vars.method]" path="#[vars.path]">
             <http:headers><![CDATA[#[vars.requestHeaders default {}]]]></http:headers>
+            <http:query-params><![CDATA[#[vars.queryParams default {}]]]></http:query-params>
             <http:response-validator>
                 <http:success-status-code-validator values="100..599"/>
             </http:response-validator>
@@ -343,6 +344,118 @@
     </munit:test>
 
     <!-- ===================================================== protocol / routing -->
+
+    <!-- =========================================== GET /api/patients?family_name= -->
+
+    <munit:test name="search-returns-matching-records-in-record-format"
+                description="The family name is used exactly as given; every row is mapped to the record contract, in database order">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="get:\patients:patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:spy processor="db:select">
+                <munit-tools:before-call>
+                    <munit-tools:assert-equals actual="#[vars.familyName]" expected="#['Kovač']"
+                                               message="No normalisation in the System API"/>
+                </munit-tools:before-call>
+            </munit-tools:spy>
+            <munit-tools:mock-when processor="db:select">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[do { var row = readUrl('classpath://samples/patient-row.json', 'application/json') --- [ row, (row -- ['patient_id', 'given_name', 'phone']) ++ { patient_id: 'PAT-000124', given_name: 'Ivana', phone: null } ] }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="queryParams" value="#[{ family_name: 'Kovač' }]"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'X-Correlation-ID': 'sys-search-001' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[200]"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'x-correlation-id']" expected="#['sys-search-001']"/>
+            <munit-tools:assert-equals actual="#[payload.patient_id]" expected="#[['PAT-000123', 'PAT-000124']]"/>
+            <munit-tools:assert-equals actual="#[payload[0] orderBy $$]"
+                                       expected="#[(readUrl('classpath://samples/record-input.json', 'application/json') ++ { patient_id: 'PAT-000123', status: 'ACTIVE', registered_at: '2026-10-15T10:21:07Z' }) orderBy $$]"/>
+            <munit-tools:assert-equals actual="#[payload[1].phone?]" expected="#[false]" message="NULL phone is omitted"/>
+            <munit-tools:verify-call processor="db:select" times="1"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="search-without-matches-returns-empty-array"
+                description="No matching row is 200 with an empty array, not 404">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="get:\patients:patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="db:select">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="queryParams" value="#[{ family_name: 'Nobody' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[200]"/>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[[]]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="search-without-family-name-returns-400"
+                description="family_name is required; the database is not queried">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="get:\patients:patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[400]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['BAD_REQUEST']"/>
+            <munit-tools:verify-call processor="db:select" times="0"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="search-database-unreachable-returns-502"
+                description="A connectivity error during the search answers 502 DOWNSTREAM_ERROR">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-sys-api-main"/>
+            <munit:enable-flow-source value="get:\patients:patient-sys-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="db:select">
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="DB:CONNECTIVITY"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="queryParams" value="#[{ family_name: 'Kovač' }]"/>
+            <flow-ref name="call-sys-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[502]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['DOWNSTREAM_ERROR']"/>
+        </munit:validation>
+    </munit:test>
 
     <munit:test name="unknown-resource-returns-404-resource-not-found"
                 description="Paths outside the spec answer 404 with the standard body">

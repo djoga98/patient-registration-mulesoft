@@ -80,6 +80,38 @@
                   doc:description="Logs the status and turns unsuccessful responses into typed errors"/>
     </sub-flow>
 
+    <sub-flow name="search-patients"
+              doc:name="search-patients"
+              doc:description="GET the patients with last name vars.lastName from the Process API, retrying transient failures">
+        <until-successful maxRetries="${retry.get.maxRetries}" millisBetweenRetries="${retry.get.delayMillis}"
+                          doc:name="Retry transient failures"
+                          doc:description="Retries connection errors, timeouts and 503 only; at most 3 attempts">
+            <!-- The query string carries a patient name: the logged path leaves it out. -->
+            <logger level="INFO" category="com.acme.patient.exp"
+                    message="#[dwl::LogEvent::event('downstream.request', vars.correlationId, { target: 'process-api', method: 'GET', path: p('processApi.basePath') ++ '/patients' })]"
+                    doc:name="Log Process API call"
+                    doc:description="Logs each outbound attempt (no search term)"/>
+            <set-variable variableName="downstreamStartMillis" value="#[now() as Number { unit: 'milliseconds' }]"
+                          doc:name="Call start time"
+                          doc:description="Start of this attempt, for its duration"/>
+            <http:request config-ref="process-api-request-config"
+                          method="GET" path="/patients"
+                          responseTimeout="${processApi.responseTimeoutMillis}"
+                          sendCorrelationId="NEVER"
+                          doc:name="GET /patients?lastName="
+                          doc:description="Searches the patients; only 503 raises an error so only transient failures are retried">
+                <http:headers><![CDATA[#[{ 'X-Correlation-ID': vars.correlationId }]]]></http:headers>
+                <http:query-params><![CDATA[#[{ lastName: vars.lastName }]]]></http:query-params>
+                <http:response-validator>
+                    <http:failure-status-code-validator values="503"/>
+                </http:response-validator>
+            </http:request>
+        </until-successful>
+        <flow-ref name="handle-process-api-response"
+                  doc:name="Handle Process API response"
+                  doc:description="Logs the status and turns unsuccessful responses into typed errors"/>
+    </sub-flow>
+
     <sub-flow name="handle-process-api-response"
               doc:name="handle-process-api-response"
               doc:description="Keeps the meaning of Process API errors: 404/409/422/400 stay, everything else is 502">

@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Patient Registration APIs: sample cases",
-    "description": "The nine sample cases of the assignment, against the Experience API.\nRun in order (case 4 is a duplicate of case 1; case 8 reads the patient created by case 1)\nagainst an empty patient table. Select the \"local\" or \"cloudhub\" environment for {{baseUrl}}.",
+    "description": "The nine sample cases of the assignment, against the Experience API, followed by two\nsearches by last name (bonus endpoint). Run in order (case 4 is a duplicate of case 1;\ncases 8 and 10 read the patient created by case 1) against an empty patient table.\nSelect the \"local\" or \"cloudhub\" environment for {{baseUrl}}.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -497,6 +497,98 @@
             "api",
             "patients",
             "PAT-999999"
+          ]
+        }
+      }
+    },
+    {
+      "name": "10. GET search lastName=KOVAČ -> 200, only Ana Kovač (case 4 was rejected)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "function ageOn(isoBirthDate) {",
+              "    const [y, m, d] = isoBirthDate.split('-').map(Number);",
+              "    const t = new Date();",
+              "    const reached = (t.getMonth() + 1 > m) || (t.getMonth() + 1 === m && t.getDate() >= d);",
+              "    return t.getFullYear() - y - (reached ? 0 : 1);",
+              "}",
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const list = pm.response.json();",
+              "pm.test('exactly one match', () => pm.expect(list).to.have.lengthOf(1));",
+              "pm.test('the patient of case 1', () => pm.expect(list[0].patientId).to.eql(pm.collectionVariables.get('case1PatientId')));",
+              "pm.test('portal view', () => pm.expect(list[0].fullName).to.eql('Ana Kovač'));",
+              "pm.test('age', () => pm.expect(list[0].age).to.eql(ageOn('1985-04-12')));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients?lastName=KOVAČ",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients"
+          ],
+          "query": [
+            {
+              "key": "lastName",
+              "value": "KOVAČ"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "11. GET search lastName=Nepoznat -> 200, empty array",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('empty array', () => pm.expect(pm.response.json()).to.eql([]));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients?lastName=Nepoznat",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients"
+          ],
+          "query": [
+            {
+              "key": "lastName",
+              "value": "Nepoznat"
+            }
           ]
         }
       }

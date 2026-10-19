@@ -21,10 +21,11 @@
         <http:request-connection host="localhost" port="${http.port}"/>
     </http:request-config>
 
-    <!-- Sends payload to the API. Inputs: vars.method, vars.path, vars.requestHeaders. -->
+    <!-- Sends payload to the API. Inputs: vars.method, vars.path, vars.requestHeaders, vars.queryParams. -->
     <sub-flow name="call-prc-api">
         <http:request config-ref="test-http-client" method="#[vars.method]" path="#[vars.path]">
             <http:headers><![CDATA[#[vars.requestHeaders default {}]]]></http:headers>
+            <http:query-params><![CDATA[#[vars.queryParams default {}]]]></http:query-params>
             <http:response-validator>
                 <http:success-status-code-validator values="100..599"/>
             </http:response-validator>
@@ -556,6 +557,144 @@
     </munit:test>
 
     <!-- ========================================================================= GET -->
+
+    <!-- ================================================ GET /api/patients?lastName= -->
+
+    <munit:test name="search-normalises-last-name-and-maps-records"
+                description="'  KOVAČ ' is searched as 'Kovač' (registration normalisation); records come back in portal field names">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-prc-api-main"/>
+            <munit:enable-flow-source value="get:\patients:patient-prc-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:spy processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="system-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:before-call>
+                    <munit-tools:assert-equals actual="#[vars.familyName]" expected="#['Kovač']"/>
+                    <munit-tools:assert-equals actual="#[vars.correlationId]" expected="#['prc-search-001']"/>
+                </munit-tools:before-call>
+            </munit-tools:spy>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="system-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[output application/json --- [ readUrl('classpath://samples/system-record-case1.json', 'application/json') ]]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="queryParams" value="#[{ lastName: '  KOVAČ ' }]"/>
+            <set-variable variableName="requestHeaders" value="#[{ 'X-Correlation-ID': 'prc-search-001' }]"/>
+            <flow-ref name="call-prc-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[200]"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'x-correlation-id']" expected="#['prc-search-001']"/>
+            <munit-tools:assert-equals actual="#[sizeOf(payload)]" expected="#[1]"/>
+            <munit-tools:assert-equals actual="#[payload[0] orderBy $$]"
+                                       expected="#[readUrl('classpath://samples/expected-patient-case1.json', 'application/json') orderBy $$]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="search-without-matches-returns-empty-array"
+                description="An empty System API result is an empty array (200)">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-prc-api-main"/>
+            <munit:enable-flow-source value="get:\patients:patient-prc-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="system-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[output application/json --- []]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="queryParams" value="#[{ lastName: 'Nobody' }]"/>
+            <flow-ref name="call-prc-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[200]"/>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[[]]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="search-blank-or-missing-last-name-returns-400"
+                description="A blank lastName breaks the PersonName pattern; nothing is sent to the System API">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-prc-api-main"/>
+            <munit:enable-flow-source value="get:\patients:patient-prc-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="queryParams" value="#[{ lastName: '   ' }]"/>
+            <flow-ref name="call-prc-api"/>
+            <set-variable variableName="blankStatus" value="#[attributes.statusCode]"/>
+            <set-variable variableName="blankCode" value="#[payload.error.code]"/>
+            <remove-variable variableName="queryParams"/>
+            <flow-ref name="call-prc-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[vars.blankStatus]" expected="#[400]"/>
+            <munit-tools:assert-equals actual="#[vars.blankCode]" expected="#['BAD_REQUEST']"/>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[400]" message="Missing lastName"/>
+            <munit-tools:verify-call processor="http:request" times="0">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="system-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="search-connection-failure-is-retried-three-times-then-502"
+                description="The search is a GET: connection errors are retried, 3 attempts in total, then 502">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-prc-api-main"/>
+            <munit:enable-flow-source value="get:\patients:patient-prc-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="system-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:CONNECTIVITY"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients"/>
+            <set-variable variableName="queryParams" value="#[{ lastName: 'Kovač' }]"/>
+            <flow-ref name="call-prc-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[502]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['DOWNSTREAM_ERROR']"/>
+            <munit-tools:verify-call processor="http:request" times="3">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="system-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
 
     <munit:test name="get-maps-record-back-to-portal-fields"
                 description="GET returns the same Process shape as POST (assignment step 5)">

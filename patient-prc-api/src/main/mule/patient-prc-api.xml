@@ -50,6 +50,30 @@
                       doc:description="Points the Location header at the new patient resource"/>
     </flow>
 
+    <flow name="get:\patients:patient-prc-api-config"
+          doc:name="GET /patients"
+          doc:description="Searches patients by last name through the System API, in portal field names">
+        <set-variable variableName="familyName" value="#[dwl::PatientMapping::normaliseName(attributes.queryParams.lastName)]"
+                      doc:name="Normalised last name"
+                      doc:description="Normalises the search term exactly like a registered last name (not logged)"/>
+        <flow-ref name="search-patient-records"
+                  doc:name="Search patient records"
+                  doc:description="Searches the System API by family name, retrying transient failures"/>
+        <ee:transform doc:name="Records to patients"
+                      doc:description="Maps every System API record back to portal field names">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+import toPatient from dwl::PatientMapping
+output application/json
+---
+payload map toPatient($)]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        <set-variable variableName="httpStatus" value="#[200]"
+                      doc:name="Status 200"
+                      doc:description="Marks the response as OK"/>
+    </flow>
+
     <flow name="get:\patients\(patientId):patient-prc-api-config"
           doc:name="GET /patients/{patientId}"
           doc:description="Reads one patient through the System API in portal field names">

@@ -1,0 +1,12 @@
+[
+  {
+    "patientId": "PAT-000123",
+    "fullName": "Ana Kovač",
+    "age": 41,
+    "category": "ADULT",
+    "email": "ana.kovac@example.com",
+    "phone": "+38761111222",
+    "status": "ACTIVE",
+    "registeredAt": "2026-10-15T10:21:07Z"
+  }
+]

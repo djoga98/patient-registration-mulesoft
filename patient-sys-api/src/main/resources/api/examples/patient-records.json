@@ -1,0 +1,17 @@
+[
+  {
+    "patient_id": "PAT-000123",
+    "given_name": "Ana",
+    "family_name": "Kovač",
+    "birth_date": "1985-04-12",
+    "sex": "F",
+    "category": "ADULT",
+    "email": "ana.kovac@example.com",
+    "phone": "+38761111222",
+    "consent_data_processing": true,
+    "consent_sms": false,
+    "source": "PORTAL",
+    "status": "ACTIVE",
+    "registered_at": "2026-10-15T10:21:07Z"
+  }
+]

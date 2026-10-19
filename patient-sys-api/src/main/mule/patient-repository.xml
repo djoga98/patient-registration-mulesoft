@@ -109,4 +109,48 @@ fromRow(payload[0])]]></ee:set-payload>
             </ee:message>
         </ee:transform>
     </sub-flow>
+
+    <sub-flow name="find-patients-by-family-name"
+              doc:name="find-patients-by-family-name"
+              doc:description="Selects the patients whose family name equals vars.familyName, ordered by patient ID">
+        <!-- Exact, case-sensitive match on the stored value (ix_patient_family_name):
+             names are stored normalised, and the Process API normalises the search term
+             the same way. This API applies no rules of its own. -->
+        <db:select config-ref="database-config"
+                   queryTimeout="${db.queryTimeoutSeconds}"
+                   queryTimeoutUnit="SECONDS"
+                   doc:name="Select patients by family name"
+                   doc:description="Selects at most search.maxResults matching rows, in patient ID order">
+            <db:sql><![CDATA[
+SELECT patient_id,
+       given_name,
+       family_name,
+       to_char(birth_date, 'YYYY-MM-DD') AS birth_date,
+       sex,
+       category,
+       email,
+       phone,
+       consent_data_processing,
+       consent_sms,
+       source,
+       status,
+       CAST(floor(extract(EPOCH FROM registered_at)) AS BIGINT) AS registered_epoch
+  FROM patient
+ WHERE family_name = :family_name
+ ORDER BY patient_id
+ LIMIT :max_results
+]]></db:sql>
+            <db:input-parameters><![CDATA[#[{ family_name: vars.familyName, max_results: p('search.maxResults') as Number }]]]></db:input-parameters>
+        </db:select>
+        <ee:transform doc:name="Rows to records"
+                      doc:description="Maps every selected row to the snake_case record contract">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+import fromRow from dwl::PatientRecords
+output application/json
+---
+payload map fromRow($)]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </sub-flow>
 </mule>

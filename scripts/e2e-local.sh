@@ -57,7 +57,7 @@ actual=$(psql -F ' | ' -c "SELECT patient_id, given_name, family_name, sex, cate
 echo "PASS: rows match the expected normalised records"
 
 echo "== 3. logs"
-pii='Ana|Kova|Luka|Petrovi|Milena|Jovi|Ivan|Mari|Sara|Ili|Petar|Babi|@example\.com|@Example\.com|111-222|61111222|222 333|222333|444 555|1985-04-12|2012-09-03|1950-01-20|1978-11-30|2030-05-01|1992-06-15'
+pii='Ana|Kova|KOVA|Nepoznat|Luka|Petrovi|Milena|Jovi|Ivan|Mari|Sara|Ili|Petar|Babi|@example\.com|@Example\.com|111-222|61111222|222 333|222333|444 555|1985-04-12|2012-09-03|1950-01-20|1978-11-30|2030-05-01|1992-06-15'
 status=0
 sleep 2   # application loggers are asynchronous
 for app in patient-exp-api patient-prc-api patient-sys-api; do

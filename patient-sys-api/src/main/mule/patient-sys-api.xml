@@ -48,6 +48,20 @@
                       doc:description="Points the Location header at the new patient resource"/>
     </flow>
 
+    <flow name="get:\patients:patient-sys-api-config"
+          doc:name="GET /patients"
+          doc:description="Returns the records with exactly the given family name">
+        <set-variable variableName="familyName" value="#[attributes.queryParams.family_name]"
+                      doc:name="Family name"
+                      doc:description="Reads the family name from the query string (not logged)"/>
+        <flow-ref name="find-patients-by-family-name"
+                  doc:name="Find patients"
+                  doc:description="Selects the matching records; none gives an empty array"/>
+        <set-variable variableName="httpStatus" value="#[200]"
+                      doc:name="Status 200"
+                      doc:description="Marks the response as OK"/>
+    </flow>
+
     <flow name="get:\patients\(patientId):patient-sys-api-config"
           doc:name="GET /patients/{patientId}"
           doc:description="Returns one stored patient record">

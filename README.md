@@ -110,6 +110,24 @@ the portal contract. The Process spec is required by the assignment, and it also
 protects the Process API from other channels. **Business rules are only in the Process
 API.**
 
+### Search by last name (bonus)
+
+`GET /api/patients?lastName={lastName}` runs through all three layers. Each layer keeps
+its own responsibility:
+
+| Layer | Query | Does | Returns |
+|---|---|---|---|
+| Experience | `lastName` (required, non-blank) | forwards the term unchanged | array of portal views (age today) |
+| Process | `lastName` | normalises it **like a registered last name** (trim, first letter upper, rest lower) | array of patients in portal field names |
+| System | `family_name` | exact match on the stored value, `ORDER BY patient_id LIMIT 100`, index `ix_patient_family_name` | array of records |
+
+- Because the stored names are normalised the same way, `KOVAČ` or ` kovač ` finds `Kovač`.
+- No match is `200 []`, not 404.
+- The search is a GET, so it gets the same timeouts and retries as the read by ID.
+- The search term is a patient name, so it is never logged. The logged downstream path
+  leaves out the query string, and `request.received` logs the path without it.
+- The 100-row cap is a fixed guard. There is no paging yet (see Unfinished work).
+
 ## DataWeave: mapping and normalisation
 
 Mappings live in `.dwl` modules (`src/main/resources/dwl`), each with its own MUnit
@@ -420,4 +438,5 @@ With more time:
   private-space ingress for the System API.
 - OpenTelemetry tracing across the hops.
 - A Testcontainers-based integration suite in CI instead of the local scripts.
-- The search endpoint (`GET /api/patients?lastName=`) through all layers.
+- Paging for the search endpoint (`limit`/`offset` or a cursor) instead of the fixed cap
+  of 100, and prefix or accent-insensitive matching if the portal needs it.

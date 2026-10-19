@@ -58,6 +58,37 @@ uses:
           application/json:
             type: portal.ErrorResponse
 
+  get:
+    displayName: Search patients by last name
+    description: |
+      Patients with the given last name, in the portal view. Case and surrounding spaces
+      do not matter ("kovač" finds "Kovač"). Ordered by patient ID; at most 100 patients.
+    is: [ correlated ]
+    queryParameters:
+      lastName:
+        type: portal.PersonName
+        example: kovač
+    responses:
+      200:
+        description: The matching patients; an empty array when none match.
+        body:
+          application/json:
+            type: portal.PortalPatient[]
+            example: !include examples/portal-patients.json
+      400:
+        body:
+          application/json:
+            type: portal.ErrorResponse
+      500:
+        body:
+          application/json:
+            type: portal.ErrorResponse
+      502:
+        description: A lower API is unreachable, timed out or unavailable after retries.
+        body:
+          application/json:
+            type: portal.ErrorResponse
+
   /{patientId}:
     uriParameters:
       patientId: portal.PatientId

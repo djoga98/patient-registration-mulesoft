@@ -80,6 +80,31 @@ toProcessRegistration(payload)]]></ee:set-payload>
                       doc:description="Marks the response as OK"/>
     </flow>
 
+    <flow name="get:\patients:patient-exp-api-config"
+          doc:name="GET /patients"
+          doc:description="Searches patients by last name through the Process API and returns portal views">
+        <set-variable variableName="lastName" value="#[attributes.queryParams.lastName]"
+                      doc:name="Last name"
+                      doc:description="The search term, forwarded unchanged; the Process API normalises it (not logged)"/>
+        <flow-ref name="search-patients"
+                  doc:name="Search via Process API"
+                  doc:description="Searches through the Process API, retrying transient failures"/>
+        <ee:transform doc:name="Patients to portal views"
+                      doc:description="Shapes every patient for the portal, age on the day of the request">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+import toPortalPatient, todayIn from dwl::PortalView
+output application/json
+var today = todayIn(p('clinic.timeZone'))
+---
+payload map toPortalPatient($, today)]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        <set-variable variableName="httpStatus" value="#[200]"
+                      doc:name="Status 200"
+                      doc:description="Marks the response as OK"/>
+    </flow>
+
     <sub-flow name="to-portal-patient"
               doc:name="to-portal-patient"
               doc:description="Process API patient to the portal's flat view with full name and age on the day of the request">

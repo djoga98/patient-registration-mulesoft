@@ -11,3 +11,7 @@ db:
   pool:
     maxSize: "5"
     maxWaitMillis: "5000"
+
+search:
+  # Upper bound on the records one search returns (ordered by patient ID).
+  maxResults: "100"

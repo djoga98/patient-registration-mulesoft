@@ -52,6 +52,39 @@ uses:
           application/json:
             type: rec.ErrorResponse
 
+  get:
+    displayName: Search patient records by family name
+    description: |
+      Records whose family name equals the given value exactly, as stored. The Process
+      API normalises the name first. Ordered by patient ID; at most 100 records.
+    is: [ correlated ]
+    queryParameters:
+      family_name:
+        type: string
+        minLength: 1
+        maxLength: 100
+        example: Kovač
+    responses:
+      200:
+        description: The matching records; an empty array when none match.
+        body:
+          application/json:
+            type: rec.PatientRecord[]
+            example: !include examples/patient-records.json
+      400:
+        body:
+          application/json:
+            type: rec.ErrorResponse
+      500:
+        body:
+          application/json:
+            type: rec.ErrorResponse
+      502:
+        description: The database is unreachable.
+        body:
+          application/json:
+            type: rec.ErrorResponse
+
   /{patientId}:
     uriParameters:
       patientId: rec.PatientId
