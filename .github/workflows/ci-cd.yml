@@ -1,0 +1,153 @@
+# Build and test on every push and pull request; deploy to CloudHub 2.0 from main.
+#
+# Deployment is switched off until the repository variable CLOUDHUB_DEPLOY_ENABLED is
+# "true". See docs/deployment.md for the secrets and variables to configure first.
+name: ci-cd
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MAVEN_VERSION: 3.9.15
+  JAVA_VERSION: "17"
+
+jobs:
+  build-test:
+    name: build & test (${{ matrix.app }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [ patient-sys-api, patient-prc-api, patient-exp-api ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Install Maven ${{ env.MAVEN_VERSION }}
+        uses: stCarolas/setup-maven@v5
+        with:
+          maven-version: ${{ env.MAVEN_VERSION }}
+
+      - name: Write Maven settings (Exchange + optional MuleSoft EE repository)
+        env:
+          ANYPOINT_CLIENT_ID: ${{ secrets.ANYPOINT_CLIENT_ID }}
+          ANYPOINT_CLIENT_SECRET: ${{ secrets.ANYPOINT_CLIENT_SECRET }}
+          MULE_EE_REPO_USERNAME: ${{ secrets.MULE_EE_REPO_USERNAME }}
+          MULE_EE_REPO_PASSWORD: ${{ secrets.MULE_EE_REPO_PASSWORD }}
+        run: .github/scripts/write-maven-settings.sh .ci-settings.xml
+
+      # MUnit runs in the test phase; a failing test fails this step and the workflow.
+      - name: Build and run MUnit (mvn clean verify)
+        working-directory: ${{ matrix.app }}
+        run: mvn -B -ntp -s "$GITHUB_WORKSPACE/.ci-settings.xml" clean verify
+
+      - name: Publish MUnit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: munit-${{ matrix.app }}
+          path: |
+            ${{ matrix.app }}/target/site/munit/
+            ${{ matrix.app }}/target/munit-reports/
+            ${{ matrix.app }}/target/surefire-reports/
+            ${{ matrix.app }}/target/sonar-reports/
+          if-no-files-found: warn
+
+      - name: Coverage summary
+        if: always()
+        working-directory: ${{ matrix.app }}
+        run: |
+          report=target/site/munit/coverage/munit-coverage.json
+          if [ -f "$report" ]; then
+            coverage=$(jq -r '.coverage' "$report")
+            echo "### ${{ matrix.app }}: MUnit application coverage: ${coverage}%" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  deploy:
+    name: deploy to CloudHub 2.0
+    needs: build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CLOUDHUB_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # GitHub environment: holds the deployment secrets and can require approval.
+    environment: cloudhub-dev
+    concurrency:
+      group: cloudhub-deploy
+      cancel-in-progress: false
+    env:
+      ANYPOINT_CLIENT_ID: ${{ secrets.ANYPOINT_CLIENT_ID }}
+      ANYPOINT_CLIENT_SECRET: ${{ secrets.ANYPOINT_CLIENT_SECRET }}
+      ANYPOINT_BUSINESS_GROUP_ID: ${{ vars.ANYPOINT_BUSINESS_GROUP_ID }}
+      MULE_SECURE_KEY: ${{ secrets.MULE_SECURE_KEY }}
+      DB_URL: ${{ secrets.DB_URL }}
+      SYS_API_HOST: ${{ vars.SYS_API_HOST }}
+      PRC_API_HOST: ${{ vars.PRC_API_HOST }}
+      VERSION: 1.0.${{ github.run_number }}
+      CLOUDHUB_ENVIRONMENT: ${{ vars.CLOUDHUB_ENVIRONMENT || 'Sandbox' }}
+      CLOUDHUB_TARGET: ${{ vars.CLOUDHUB_TARGET || 'Cloudhub-US-East-2' }}
+      CLOUDHUB_MULE_VERSION: ${{ vars.CLOUDHUB_MULE_VERSION || '4.12.3' }}
+      CLOUDHUB_RELEASE_CHANNEL: ${{ vars.CLOUDHUB_RELEASE_CHANNEL || 'EDGE' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Install Maven ${{ env.MAVEN_VERSION }}
+        uses: stCarolas/setup-maven@v5
+        with:
+          maven-version: ${{ env.MAVEN_VERSION }}
+
+      - name: Check deployment configuration
+        run: |
+          missing=0
+          for name in ANYPOINT_CLIENT_ID ANYPOINT_CLIENT_SECRET ANYPOINT_BUSINESS_GROUP_ID MULE_SECURE_KEY DB_URL; do
+            if [ -z "${!name}" ]; then echo "::error::$name is not configured"; missing=1; fi
+          done
+          # CloudHub assigns each app's host on its first deployment, so a layer is only
+          # deployed once the host of the layer below it is known (docs/deployment.md).
+          [ -n "$SYS_API_HOST" ] || echo "::warning::SYS_API_HOST not set: deploying patient-sys-api only"
+          [ -n "$PRC_API_HOST" ] || echo "::warning::PRC_API_HOST not set: patient-exp-api will not be deployed"
+          if [ ! -f patient-sys-api/src/main/resources/config/secure-dev.yaml ]; then
+            echo "::error::patient-sys-api/src/main/resources/config/secure-dev.yaml is missing (scripts/generate-cloud-secrets.sh)"
+            missing=1
+          fi
+          exit $missing
+
+      - name: Write Maven settings
+        env:
+          MULE_EE_REPO_USERNAME: ${{ secrets.MULE_EE_REPO_USERNAME }}
+          MULE_EE_REPO_PASSWORD: ${{ secrets.MULE_EE_REPO_PASSWORD }}
+        run: .github/scripts/write-maven-settings.sh .ci-settings.xml
+
+      - name: Set Exchange coordinates (groupId = business group, version = run number)
+        run: |
+          for app in patient-sys-api patient-prc-api patient-exp-api; do
+            .github/scripts/set-exchange-coordinates.sh "$app" "$ANYPOINT_BUSINESS_GROUP_ID" "$VERSION"
+          done
+
+      # Order matters: each layer calls the one below it. Tests already passed in build-test.
+      - name: Publish to Exchange and deploy patient-sys-api
+        run: .github/scripts/deploy-app.sh patient-sys-api
+
+      - name: Publish to Exchange and deploy patient-prc-api
+        if: env.SYS_API_HOST != ''
+        run: .github/scripts/deploy-app.sh patient-prc-api
+
+      - name: Publish to Exchange and deploy patient-exp-api
+        if: env.SYS_API_HOST != '' && env.PRC_API_HOST != ''
+        run: .github/scripts/deploy-app.sh patient-exp-api

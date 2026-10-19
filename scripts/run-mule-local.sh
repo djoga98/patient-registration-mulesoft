@@ -45,7 +45,6 @@ done
 to_native() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else echo "$1"; fi; }
 home="$(to_native "$MULE_HOME")"
 base="$(to_native "$MULE_BASE")"
-sep=":"; command -v cygpath >/dev/null && sep=";"
 
 opens=()
 for pkg in java.base/java.lang java.base/java.lang.reflect java.base/java.lang.invoke java.sql/java.sql \

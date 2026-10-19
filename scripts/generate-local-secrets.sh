@@ -13,8 +13,10 @@ if [[ ! -f "$env_file" ]]; then
     exit 1
 fi
 
-# shellcheck disable=SC1090
-set -a; source "$env_file"; set +a
+set -a
+# shellcheck source=/dev/null
+source "$env_file"
+set +a
 : "${MULE_SECURE_KEY:?MULE_SECURE_KEY missing in infrastructure/.env}"
 : "${APP_DB_PASSWORD:?APP_DB_PASSWORD missing in infrastructure/.env}"
 

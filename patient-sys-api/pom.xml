@@ -136,6 +136,74 @@
         </dependency>
     </dependencies>
 
+    <!--
+      CloudHub 2.0 deployment (shared space, smallest replica). Used only by the CD workflow:
+        mvn -P cloudhub2 deploy -DmuleDeploy
+      publishes the application to Exchange (groupId must be the business group ID; the
+      workflow sets it) and deploys it. Credentials and secrets come from environment
+      variables that the workflow fills from GitHub Secrets; nothing secret is in this file.
+    -->
+    <profiles>
+        <profile>
+            <id>cloudhub2</id>
+            <properties>
+                <cloudhub.environment>Sandbox</cloudhub.environment>
+                <cloudhub.target>Cloudhub-US-East-2</cloudhub.target>
+                <!-- Tested runtime line (4.12, Edge channel, Java 17). Override with -Dcloudhub.muleVersion
+                     to a version listed in Runtime Manager if this patch is not offered. -->
+                <cloudhub.muleVersion>4.12.3</cloudhub.muleVersion>
+                <cloudhub.releaseChannel>EDGE</cloudhub.releaseChannel>
+                <cloudhub.applicationName>${project.artifactId}</cloudhub.applicationName>
+                <cloudhub.env>dev</cloudhub.env>
+            </properties>
+            <distributionManagement>
+                <repository>
+                    <id>anypoint-exchange-v3</id>
+                    <name>Anypoint Exchange</name>
+                    <url>https://maven.anypoint.mulesoft.com/api/v3/organizations/${env.ANYPOINT_BUSINESS_GROUP_ID}/maven</url>
+                    <layout>default</layout>
+                </repository>
+            </distributionManagement>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.mule.tools.maven</groupId>
+                        <artifactId>mule-maven-plugin</artifactId>
+                        <version>${mule.maven.plugin.version}</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <classifier>mule-application</classifier>
+                            <cloudhub2Deployment>
+                                <uri>https://anypoint.mulesoft.com</uri>
+                                <provider>MC</provider>
+                                <environment>${cloudhub.environment}</environment>
+                                <target>${cloudhub.target}</target>
+                                <muleVersion>${cloudhub.muleVersion}</muleVersion>
+                                <releaseChannel>${cloudhub.releaseChannel}</releaseChannel>
+                                <javaVersion>17</javaVersion>
+                                <applicationName>${cloudhub.applicationName}</applicationName>
+                                <replicas>1</replicas>
+                                <vCores>0.1</vCores>
+                                <businessGroupId>${env.ANYPOINT_BUSINESS_GROUP_ID}</businessGroupId>
+                                <connectedAppClientId>${env.ANYPOINT_CLIENT_ID}</connectedAppClientId>
+                                <connectedAppClientSecret>${env.ANYPOINT_CLIENT_SECRET}</connectedAppClientSecret>
+                                <connectedAppGrantType>client_credentials</connectedAppGrantType>
+                                <deploymentTimeout>900000</deploymentTimeout>
+                                <properties>
+                                    <env>${cloudhub.env}</env>
+                                </properties>
+                                <secureProperties>
+                                    <secure.key>${env.MULE_SECURE_KEY}</secure.key>
+                                    <db.url>${env.DB_URL}</db.url>
+                                </secureProperties>
+                            </cloudhub2Deployment>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
     <repositories>
         <repository>
             <id>anypoint-exchange-v3</id>
