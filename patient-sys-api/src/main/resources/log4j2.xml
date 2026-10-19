@@ -22,6 +22,8 @@
         <AsyncLogger name="org.mule.service.http" level="WARN"/>
         <AsyncLogger name="org.mule.extension.http" level="WARN"/>
         <AsyncLogger name="org.mule.extension.db" level="WARN"/>
+        <!-- c3p0 logs the JDBC URL and database user at INFO when a pool starts. -->
+        <AsyncLogger name="com.mchange" level="WARN"/>
         <AsyncLogger name="org.mule.runtime.core.internal.processor.LoggerMessageProcessor" level="INFO"/>
         <AsyncLogger name="com.acme.patient" level="INFO"/>
 
