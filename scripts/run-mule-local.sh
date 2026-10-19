@@ -55,7 +55,7 @@ for pkg in java.base/java.lang java.base/java.lang.reflect java.base/java.lang.i
 done
 
 exec "${JAVA_HOME:+$JAVA_HOME/bin/}java" \
-    -Xms1024m -Xmx1024m -XX:MaxMetaspaceSize=256m \
+    -Xms1024m -Xmx1024m -XX:MaxMetaspaceSize=512m \
     -Dmule.home="$home" -Dmule.base="$base" \
     -Djava.net.preferIPv4Stack=TRUE -Dfile.encoding=UTF-8 \
     -Danypoint.platform.analytics_enabled=false \

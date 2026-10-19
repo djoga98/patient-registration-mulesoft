@@ -1,0 +1,505 @@
+{
+  "info": {
+    "name": "Patient Registration APIs: sample cases",
+    "description": "The nine sample cases of the assignment, against the Experience API.\nRun in order (case 4 is a duplicate of case 1; case 8 reads the patient created by case 1)\nagainst an empty patient table. Select the \"local\" or \"cloudhub\" environment for {{baseUrl}}.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// A fresh correlation ID per request; the tests check it comes back.",
+          "pm.variables.set('correlationId', pm.variables.replaceIn('{{$guid}}'));"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('X-Correlation-ID echoed', () => pm.expect(pm.response.headers.get('X-Correlation-ID')).to.eql(pm.variables.get('correlationId')));",
+          "pm.test('JSON response', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json'));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "case1PatientId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. POST Ana Kovač (messy casing and phone) -> 201 ADULT",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "function ageOn(isoBirthDate) {",
+              "    const [y, m, d] = isoBirthDate.split('-').map(Number);",
+              "    const t = new Date();",
+              "    const reached = (t.getMonth() + 1 > m) || (t.getMonth() + 1 === m && t.getDate() >= d);",
+              "    return t.getFullYear() - y - (reached ? 0 : 1);",
+              "}",
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "const p = pm.response.json();",
+              "pm.test('patientId is PAT- plus six digits', () => pm.expect(p.patientId).to.match(/^PAT-\\d{6}$/));",
+              "pm.test('fullName normalised', () => pm.expect(p.fullName).to.eql('Ana Kovač'));",
+              "pm.test('category ADULT', () => pm.expect(p.category).to.eql('ADULT'));",
+              "pm.test('email lower case', () => pm.expect(p.email).to.eql('ana.kovac@example.com'));",
+              "pm.test('phone compacted', () => pm.expect(p.phone).to.eql('+38761111222'));",
+              "pm.test('status ACTIVE', () => pm.expect(p.status).to.eql('ACTIVE'));",
+              "pm.test('age is completed years today', () => pm.expect(p.age).to.eql(ageOn('1985-04-12')));",
+              "pm.test('registeredAt is UTC', () => pm.expect(p.registeredAt).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/));",
+              "pm.test('Location header points at the patient', () => pm.expect(pm.response.headers.get('Location')).to.eql('/api/patients/' + p.patientId));",
+              "pm.test('only portal fields', () => pm.expect(Object.keys(p).sort()).to.eql(['age','category','email','fullName','patientId','phone','registeredAt','status']));",
+              "pm.collectionVariables.set('case1PatientId', p.patientId);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \" ana \",\n  \"lastName\": \"KOVAČ\",\n  \"dateOfBirth\": \"1985-04-12\",\n  \"gender\": \"female\",\n  \"contact\": {\n    \"email\": \"Ana.Kovac@Example.com\",\n    \"phone\": \"+387 61 111-222\"\n  },\n  \"consents\": {\n    \"dataProcessing\": true,\n    \"smsReminders\": false\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "2. POST Luka Petrović (no phone) -> 201 MINOR, no phone field",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "const p = pm.response.json();",
+              "pm.test('category MINOR', () => pm.expect(p.category).to.eql('MINOR'));",
+              "pm.test('no phone field', () => pm.expect(p).to.not.have.property('phone'));",
+              "pm.test('fullName', () => pm.expect(p.fullName).to.eql('Luka Petrović'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Luka\",\n  \"lastName\": \"Petrović\",\n  \"dateOfBirth\": \"2012-09-03\",\n  \"gender\": \"male\",\n  \"contact\": {\n    \"email\": \"luka.petrovic@example.com\"\n  },\n  \"consents\": {\n    \"dataProcessing\": true\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "3. POST Milena Jović (SMS reminders on) -> 201 SENIOR, phone 065222333",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "const p = pm.response.json();",
+              "pm.test('category SENIOR', () => pm.expect(p.category).to.eql('SENIOR'));",
+              "pm.test('phone compacted', () => pm.expect(p.phone).to.eql('065222333'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Milena\",\n  \"lastName\": \"Jović\",\n  \"dateOfBirth\": \"1950-01-20\",\n  \"gender\": \"female\",\n  \"contact\": {\n    \"email\": \"milena.jovic@example.com\",\n    \"phone\": \"(065) 222 333\"\n  },\n  \"consents\": {\n    \"dataProcessing\": true,\n    \"smsReminders\": true\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "4. POST \"ANA kovač\", same birth date as case 1 -> 409 DUPLICATE_PATIENT",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('409 DUPLICATE_PATIENT', () => pm.response.to.have.status(409));",
+              "const e = pm.response.json().error;",
+              "pm.test('error code DUPLICATE_PATIENT', () => pm.expect(e.code).to.eql('DUPLICATE_PATIENT'));",
+              "pm.test('standard error body', () => pm.expect(Object.keys(e).sort()).to.eql(['code','correlationId','message','timestamp']));",
+              "pm.test('error body carries the correlation ID', () => pm.expect(e.correlationId).to.eql(pm.variables.get('correlationId')));",
+              "pm.test('timestamp is UTC', () => pm.expect(e.timestamp).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"ANA\",\n  \"lastName\": \"kovač\",\n  \"dateOfBirth\": \"1985-04-12\",\n  \"gender\": \"female\",\n  \"contact\": {\n    \"email\": \"ana.k@example.com\"\n  },\n  \"consents\": {\n    \"dataProcessing\": true\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "5. POST Ivan Marić (data-processing consent false) -> 422 CONSENT_REQUIRED",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('422 CONSENT_REQUIRED', () => pm.response.to.have.status(422));",
+              "const e = pm.response.json().error;",
+              "pm.test('error code CONSENT_REQUIRED', () => pm.expect(e.code).to.eql('CONSENT_REQUIRED'));",
+              "pm.test('standard error body', () => pm.expect(Object.keys(e).sort()).to.eql(['code','correlationId','message','timestamp']));",
+              "pm.test('error body carries the correlation ID', () => pm.expect(e.correlationId).to.eql(pm.variables.get('correlationId')));",
+              "pm.test('timestamp is UTC', () => pm.expect(e.timestamp).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Ivan\",\n  \"lastName\": \"Marić\",\n  \"dateOfBirth\": \"1978-11-30\",\n  \"gender\": \"male\",\n  \"contact\": {\n    \"email\": \"ivan.maric@example.com\"\n  },\n  \"consents\": {\n    \"dataProcessing\": false\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "6. POST Sara Ilić (birth date in the future) -> 422 INVALID_BIRTH_DATE",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('422 INVALID_BIRTH_DATE', () => pm.response.to.have.status(422));",
+              "const e = pm.response.json().error;",
+              "pm.test('error code INVALID_BIRTH_DATE', () => pm.expect(e.code).to.eql('INVALID_BIRTH_DATE'));",
+              "pm.test('standard error body', () => pm.expect(Object.keys(e).sort()).to.eql(['code','correlationId','message','timestamp']));",
+              "pm.test('error body carries the correlation ID', () => pm.expect(e.correlationId).to.eql(pm.variables.get('correlationId')));",
+              "pm.test('timestamp is UTC', () => pm.expect(e.timestamp).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Sara\",\n  \"lastName\": \"Ilić\",\n  \"dateOfBirth\": \"2030-05-01\",\n  \"gender\": \"female\",\n  \"contact\": {\n    \"email\": \"sara.ilic@example.com\"\n  },\n  \"consents\": {\n    \"dataProcessing\": true\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "7. POST No email and gender unknown -> 400 BAD_REQUEST",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('400 BAD_REQUEST', () => pm.response.to.have.status(400));",
+              "const e = pm.response.json().error;",
+              "pm.test('error code BAD_REQUEST', () => pm.expect(e.code).to.eql('BAD_REQUEST'));",
+              "pm.test('standard error body', () => pm.expect(Object.keys(e).sort()).to.eql(['code','correlationId','message','timestamp']));",
+              "pm.test('error body carries the correlation ID', () => pm.expect(e.correlationId).to.eql(pm.variables.get('correlationId')));",
+              "pm.test('timestamp is UTC', () => pm.expect(e.timestamp).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Petar\",\n  \"lastName\": \"Babić\",\n  \"dateOfBirth\": \"1992-06-15\",\n  \"gender\": \"unknown\",\n  \"contact\": {\n    \"phone\": \"+387 66 444 555\"\n  },\n  \"consents\": {\n    \"dataProcessing\": true\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "8. GET the patient created in case 1 -> 200 Ana Kovač",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "function ageOn(isoBirthDate) {",
+              "    const [y, m, d] = isoBirthDate.split('-').map(Number);",
+              "    const t = new Date();",
+              "    const reached = (t.getMonth() + 1 > m) || (t.getMonth() + 1 === m && t.getDate() >= d);",
+              "    return t.getFullYear() - y - (reached ? 0 : 1);",
+              "}",
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const p = pm.response.json();",
+              "pm.test('same patient as case 1', () => pm.expect(p.patientId).to.eql(pm.collectionVariables.get('case1PatientId')));",
+              "pm.test('fullName', () => pm.expect(p.fullName).to.eql('Ana Kovač'));",
+              "pm.test('category ADULT', () => pm.expect(p.category).to.eql('ADULT'));",
+              "pm.test('phone', () => pm.expect(p.phone).to.eql('+38761111222'));",
+              "pm.test('age', () => pm.expect(p.age).to.eql(ageOn('1985-04-12')));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients/{{case1PatientId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients",
+            "{{case1PatientId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "9. GET PAT-999999 -> 404 PATIENT_NOT_FOUND",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('404 PATIENT_NOT_FOUND', () => pm.response.to.have.status(404));",
+              "const e = pm.response.json().error;",
+              "pm.test('error code PATIENT_NOT_FOUND', () => pm.expect(e.code).to.eql('PATIENT_NOT_FOUND'));",
+              "pm.test('standard error body', () => pm.expect(Object.keys(e).sort()).to.eql(['code','correlationId','message','timestamp']));",
+              "pm.test('error body carries the correlation ID', () => pm.expect(e.correlationId).to.eql(pm.variables.get('correlationId')));",
+              "pm.test('timestamp is UTC', () => pm.expect(e.timestamp).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients/PAT-999999",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients",
+            "PAT-999999"
+          ]
+        }
+      }
+    }
+  ]
+}
