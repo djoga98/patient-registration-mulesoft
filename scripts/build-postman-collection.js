@@ -135,6 +135,36 @@ const cases = [
             "pm.test('200 OK', () => pm.response.to.have.status(200));",
             "pm.test('empty array', () => pm.expect(pm.response.json()).to.eql([]));"
         ]
+    },
+    // Bonus: Idempotency-Key. Case 13 repeats case 12 with the same key and body.
+    {
+        n: 12, method: 'POST', name: 'Nina Horvat with a new Idempotency-Key -> 201',
+        idempotent: true,
+        prerequest: ["pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"],
+        body: {
+            firstName: 'Nina', lastName: 'Horvat', dateOfBirth: '1990-03-15', gender: 'female',
+            contact: { email: 'nina.horvat@example.com' },
+            consents: { dataProcessing: true }
+        },
+        tests: [
+            "pm.test('201 Created', () => pm.response.to.have.status(201));",
+            "pm.test('not a replay', () => pm.expect(pm.response.headers.has('Idempotent-Replayed')).to.be.false);",
+            "pm.collectionVariables.set('idempotentPatient', pm.response.text());"
+        ]
+    },
+    {
+        n: 13, method: 'POST', name: 'the same request and Idempotency-Key again -> the original 201, replayed',
+        idempotent: true,
+        body: {
+            firstName: 'Nina', lastName: 'Horvat', dateOfBirth: '1990-03-15', gender: 'female',
+            contact: { email: 'nina.horvat@example.com' },
+            consents: { dataProcessing: true }
+        },
+        tests: [
+            "pm.test('201, not 409 DUPLICATE_PATIENT', () => pm.response.to.have.status(201));",
+            "pm.test('marked as replayed', () => pm.expect(pm.response.headers.get('Idempotent-Replayed')).to.eql('true'));",
+            "pm.test('same body as the first response', () => pm.expect(pm.response.json()).to.eql(JSON.parse(pm.collectionVariables.get('idempotentPatient'))));"
+        ]
     }
 ];
 
@@ -164,7 +194,8 @@ const item = cases.map((c) => {
         method: c.method,
         header: [
             { key: 'X-Correlation-ID', value: '{{correlationId}}', type: 'text' },
-            ...(c.body ? [{ key: 'Content-Type', value: 'application/json', type: 'text' }] : [])
+            ...(c.body ? [{ key: 'Content-Type', value: 'application/json', type: 'text' }] : []),
+            ...(c.idempotent ? [{ key: 'Idempotency-Key', value: '{{idempotencyKey}}', type: 'text' }] : [])
         ],
         url: {
             raw: `{{baseUrl}}/api/patients${c.path ? '/' + c.path : ''}` +
@@ -179,7 +210,10 @@ const item = cases.map((c) => {
     }
     return {
         name: `${c.n}. ${c.method} ${c.name}`,
-        event: [{ listen: 'test', script: { type: 'text/javascript', exec: c.tests.some((l) => l.includes('ageOn(')) ? [...AGE_ON, ...c.tests] : c.tests } }],
+        event: [
+            ...(c.prerequest ? [{ listen: 'prerequest', script: { type: 'text/javascript', exec: c.prerequest } }] : []),
+            { listen: 'test', script: { type: 'text/javascript', exec: c.tests.some((l) => l.includes('ageOn(')) ? [...AGE_ON, ...c.tests] : c.tests } }
+        ],
         request
     };
 });
@@ -188,10 +222,10 @@ const collection = {
     info: {
         name: 'Patient Registration APIs: sample cases',
         description: [
-            'The nine sample cases of the assignment, against the Experience API, followed by two',
-            'searches by last name (bonus endpoint). Run in order (case 4 is a duplicate of case 1;',
-            'cases 8 and 10 read the patient created by case 1) against an empty patient table.',
-            'Select the "local" or "cloudhub" environment for {{baseUrl}}.'
+            'The nine sample cases of the assignment, against the Experience API, followed by the',
+            'bonus features: two searches by last name (10-11) and an Idempotency-Key replay (12-13).',
+            'Run in order (case 4 is a duplicate of case 1; cases 8 and 10 read the patient created by',
+            'case 1) against an empty patient table. Select the "local" or "cloudhub" environment for {{baseUrl}}.'
         ].join('\n'),
         schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'
     },
@@ -217,7 +251,11 @@ const collection = {
             }
         }
     ],
-    variable: [{ key: 'case1PatientId', value: '' }],
+    variable: [
+        { key: 'case1PatientId', value: '' },
+        { key: 'idempotencyKey', value: '' },
+        { key: 'idempotentPatient', value: '' }
+    ],
     item
 };
 

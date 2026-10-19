@@ -22,3 +22,10 @@ retry:
     # GET only: 1 attempt + 2 retries = at most 3 attempts.
     maxRetries: "2"
     delayMillis: "500"
+
+idempotency:
+  # How long the response of a completed request is replayed for a repeated Idempotency-Key.
+  ttlHours: "24"
+  # An IN_PROGRESS entry older than this is abandoned (e.g. the runtime stopped mid-request)
+  # and may be claimed again. Must exceed the longest POST: processApi.responseTimeoutMillis.
+  inProgressTimeoutSeconds: "60"

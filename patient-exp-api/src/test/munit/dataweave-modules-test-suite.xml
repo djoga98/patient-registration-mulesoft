@@ -164,4 +164,62 @@ var message = event("response.sent", "cid-1", { status: 201, path: "/api/patient
             <munit-tools:assert-equals actual="#[payload.elapsedIsNonNegative]" expected="#[true]"/>
         </munit:validation>
     </munit:test>
+
+    <munit:test name="idempotency-fingerprint-ignores-key-order-only"
+                description="The same JSON in another key order has the same fingerprint; any value change gives another">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import fingerprint from dwl::Idempotency
+output application/json
+var request = readUrl("classpath://samples/portal-case1-ana.json", "application/json")
+var reordered = {
+    consents: { smsReminders: false, dataProcessing: true },
+    contact: { phone: "+387 61 111-222", email: "Ana.Kovac@Example.com" },
+    gender: "female", dateOfBirth: "1985-04-12", lastName: "KOVAČ", firstName: "  ana "
+}
+---
+{
+    same: fingerprint(request) == fingerprint(reordered),
+    changed: fingerprint(request) == fingerprint(request update { case .firstName -> "Ana" }),
+    format: fingerprint(request) matches /^[0-9a-f]{64}$/
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[{ same: true, changed: false, format: true }]"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="idempotency-decisions"
+                description="Replay a completed request, reject another body, block a running one, claim an expired or abandoned entry">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import completedEntry, decide, inProgressEntry from dwl::Idempotency
+output application/json
+var at = |2026-10-19T12:00:00Z|
+var minute = 60000
+---
+{
+    replay:     decide(completedEntry("h1", 201, "/api/patients/PAT-000001", { patientId: "PAT-000001" }, at), "h1", at, minute),
+    mismatch:   decide(completedEntry("h1", 201, "/api/patients/PAT-000001", {}, at), "h2", at, minute),
+    running:    decide(inProgressEntry("h1", at), "h1", at + |PT30S|, minute),
+    abandoned:  decide(inProgressEntry("h1", at), "h1", at + |PT2M|, minute),
+    otherBody:  decide(inProgressEntry("h1", at), "h2", at + |PT30S|, minute),
+    absent:     decide({ state: "ABSENT" }, "h1", at, minute),
+    storedBody: completedEntry("h1", 201, "/x", { b: 1, a: "č" }, at).body
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload - 'storedBody']"
+                                       expected="#[{ replay: 'REPLAY', mismatch: 'MISMATCH', running: 'IN_PROGRESS', abandoned: 'CLAIM', otherBody: 'MISMATCH', absent: 'CLAIM' }]"/>
+            <munit-tools:assert-equals actual="#[read(payload.storedBody, 'application/json')]" expected="#[{ b: 1, a: 'č' }]"/>
+        </munit:validation>
+    </munit:test>
 </mule>

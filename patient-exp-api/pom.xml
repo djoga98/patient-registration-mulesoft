@@ -24,6 +24,7 @@
         <http.connector.version>1.11.3</http.connector.version>
         <apikit.version>1.12.2</apikit.version>
         <sockets.connector.version>1.2.9</sockets.connector.version>
+        <objectstore.connector.version>1.3.1</objectstore.connector.version>
     </properties>
 
     <build>
@@ -92,6 +93,13 @@
             <groupId>org.mule.connectors</groupId>
             <artifactId>mule-sockets-connector</artifactId>
             <version>${sockets.connector.version}</version>
+            <classifier>mule-plugin</classifier>
+        </dependency>
+        <!-- Idempotency-Key store (idempotency.xml). -->
+        <dependency>
+            <groupId>org.mule.connectors</groupId>
+            <artifactId>mule-objectstore-connector</artifactId>
+            <version>${objectstore.connector.version}</version>
             <classifier>mule-plugin</classifier>
         </dependency>
         <dependency>
@@ -170,6 +178,14 @@
                                 <connectedAppClientSecret>${env.ANYPOINT_CLIENT_SECRET}</connectedAppClientSecret>
                                 <connectedAppGrantType>client_credentials</connectedAppGrantType>
                                 <deploymentTimeout>900000</deploymentTimeout>
+                                <!-- The persistent idempotency store uses Object Store v2 (shared by replicas). -->
+                                <integrations>
+                                    <services>
+                                        <objectStoreV2>
+                                            <enabled>true</enabled>
+                                        </objectStoreV2>
+                                    </services>
+                                </integrations>
                                 <properties>
                                     <env>${cloudhub.env}</env>
                                     <processApi.host>${env.PRC_API_HOST}</processApi.host>

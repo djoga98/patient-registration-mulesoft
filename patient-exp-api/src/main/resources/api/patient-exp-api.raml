@@ -19,6 +19,17 @@ uses:
   post:
     displayName: Register a new patient
     is: [ correlated ]
+    headers:
+      Idempotency-Key:
+        type: string
+        required: false
+        pattern: ^[A-Za-z0-9._:-]{1,64}$
+        description: |
+          Optional; a UUID is recommended. A repeat of the same request with the same key
+          within 24 hours returns the original 201 response (header
+          Idempotent-Replayed: true) without registering again. Only a 201 is remembered;
+          after an error the same key can be retried.
+        example: 3b6f0c1e-8d2a-4f6e-9b1c-7a5d4e3f2a10
     body:
       application/json:
         type: portal.PortalRegistration
@@ -29,6 +40,11 @@ uses:
           Location:
             type: string
             example: /api/patients/PAT-000123
+          Idempotent-Replayed:
+            type: string
+            required: false
+            enum: [ "true" ]
+            description: Present when the response is the stored response of an earlier request with the same Idempotency-Key.
         body:
           application/json:
             type: portal.PortalPatient
@@ -38,13 +54,15 @@ uses:
           application/json:
             type: portal.ErrorResponse
       409:
-        description: A patient with the same name and date of birth already exists.
+        description: |
+          DUPLICATE_PATIENT: a patient with the same name and date of birth already exists.
+          IDEMPOTENCY_KEY_IN_PROGRESS: a request with the same Idempotency-Key is still running.
         body:
           application/json:
             type: portal.ErrorResponse
             example: !include examples/error-duplicate.json
       422:
-        description: INVALID_BIRTH_DATE or CONSENT_REQUIRED.
+        description: INVALID_BIRTH_DATE, CONSENT_REQUIRED, or IDEMPOTENCY_KEY_MISMATCH (the key was used for a different request).
         body:
           application/json:
             type: portal.ErrorResponse

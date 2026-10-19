@@ -38,7 +38,28 @@
 
     <flow name="post:\patients:application\json:patient-exp-api-config"
           doc:name="POST /patients"
-          doc:description="Forwards the portal registration with channel PORTAL and returns the portal view">
+          doc:description="Registers the patient; with an Idempotency-Key at most once per key">
+        <choice doc:name="Idempotency-Key?"
+                doc:description="The optional header turns on replay of the original response (idempotency.xml)">
+            <when expression="#[attributes.headers['idempotency-key'] != null]"
+                  doc:name="With key"
+                  doc:description="Registers once per key; repeats get the stored response">
+                <flow-ref name="register-patient-idempotently"
+                          doc:name="Register idempotently"
+                          doc:description="Claims the key, registers, remembers the response"/>
+            </when>
+            <otherwise doc:name="Without key"
+                       doc:description="Plain registration">
+                <flow-ref name="register-patient"
+                          doc:name="Register patient"
+                          doc:description="Forwards the registration and returns the portal view"/>
+            </otherwise>
+        </choice>
+    </flow>
+
+    <sub-flow name="register-patient"
+              doc:name="register-patient"
+              doc:description="Forwards the portal registration with channel PORTAL and returns the portal view">
         <ee:transform doc:name="Add channel PORTAL"
                       doc:description="Passes the portal request on unchanged, adding channel PORTAL">
             <ee:message>
@@ -61,7 +82,7 @@ toProcessRegistration(payload)]]></ee:set-payload>
         <set-variable variableName="outboundHeaders" value="#[{ Location: '/api/patients/' ++ payload.patientId }]"
                       doc:name="Location header"
                       doc:description="Points the Location header at the new patient resource"/>
-    </flow>
+    </sub-flow>
 
     <flow name="get:\patients\(patientId):patient-exp-api-config"
           doc:name="GET /patients/{patientId}"

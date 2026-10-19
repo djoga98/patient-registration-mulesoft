@@ -10,8 +10,10 @@
 # scripts/reset-local-db.sh explicitly.
 #
 # Checks:
-#   1. The nine sample cases (Postman collection, run with Newman).
-#   2. What was persisted: three normalised rows, NULL phone for case 2.
+#   1. The Postman collection with Newman: the nine sample cases, then the bonus
+#      requests (search, Idempotency-Key replay).
+#   2. What was persisted: four normalised rows (cases 1-3 and 12, once despite the
+#      replay in case 13), NULL phone for cases 2 and 12.
 #   3. The application logs written during this run: every line is JSON, every
 #      application event carries the correlation ID, no line contains patient data.
 set -euo pipefail
@@ -47,9 +49,12 @@ echo "== 2. persisted rows"
 psql -F ' | ' -c "SELECT patient_id, given_name, family_name, sex, category, email,
                          coalesce(phone, '<null>'), consent_sms, source, status
                     FROM patient ORDER BY patient_id"
+# Case 4 (the duplicate) consumes sequence value 4 in its INSERT … ON CONFLICT DO NOTHING,
+# so the Idempotency-Key registration (case 12; case 13 replays it) is PAT-000005.
 expected=$'PAT-000001 | Ana | Kovač | F | ADULT | ana.kovac@example.com | +38761111222 | f | PORTAL | ACTIVE
 PAT-000002 | Luka | Petrović | M | MINOR | luka.petrovic@example.com | <null> | f | PORTAL | ACTIVE
-PAT-000003 | Milena | Jović | F | SENIOR | milena.jovic@example.com | 065222333 | t | PORTAL | ACTIVE'
+PAT-000003 | Milena | Jović | F | SENIOR | milena.jovic@example.com | 065222333 | t | PORTAL | ACTIVE
+PAT-000005 | Nina | Horvat | F | ADULT | nina.horvat@example.com | <null> | f | PORTAL | ACTIVE'
 actual=$(psql -F ' | ' -c "SELECT patient_id, given_name, family_name, sex, category, email,
                                   coalesce(phone, '<null>'), consent_sms, source, status
                              FROM patient ORDER BY patient_id")
@@ -57,7 +62,7 @@ actual=$(psql -F ' | ' -c "SELECT patient_id, given_name, family_name, sex, cate
 echo "PASS: rows match the expected normalised records"
 
 echo "== 3. logs"
-pii='Ana|Kova|KOVA|Nepoznat|Luka|Petrovi|Milena|Jovi|Ivan|Mari|Sara|Ili|Petar|Babi|@example\.com|@Example\.com|111-222|61111222|222 333|222333|444 555|1985-04-12|2012-09-03|1950-01-20|1978-11-30|2030-05-01|1992-06-15'
+pii='Ana|Kova|KOVA|Nepoznat|Nina|Horvat|nina.horvat|1990-03-15|Luka|Petrovi|Milena|Jovi|Ivan|Mari|Sara|Ili|Petar|Babi|@example\.com|@Example\.com|111-222|61111222|222 333|222333|444 555|1985-04-12|2012-09-03|1950-01-20|1978-11-30|2030-05-01|1992-06-15'
 status=0
 sleep 2   # application loggers are asynchronous
 for app in patient-exp-api patient-prc-api patient-sys-api; do

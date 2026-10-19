@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Patient Registration APIs: sample cases",
-    "description": "The nine sample cases of the assignment, against the Experience API, followed by two\nsearches by last name (bonus endpoint). Run in order (case 4 is a duplicate of case 1;\ncases 8 and 10 read the patient created by case 1) against an empty patient table.\nSelect the \"local\" or \"cloudhub\" environment for {{baseUrl}}.",
+    "description": "The nine sample cases of the assignment, against the Experience API, followed by the\nbonus features: two searches by last name (10-11) and an Idempotency-Key replay (12-13).\nRun in order (case 4 is a duplicate of case 1; cases 8 and 10 read the patient created by\ncase 1) against an empty patient table. Select the \"local\" or \"cloudhub\" environment for {{baseUrl}}.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -29,6 +29,14 @@
   "variable": [
     {
       "key": "case1PatientId",
+      "value": ""
+    },
+    {
+      "key": "idempotencyKey",
+      "value": ""
+    },
+    {
+      "key": "idempotentPatient",
       "value": ""
     }
   ],
@@ -590,6 +598,125 @@
               "value": "Nepoznat"
             }
           ]
+        }
+      }
+    },
+    {
+      "name": "12. POST Nina Horvat with a new Idempotency-Key -> 201",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "pm.test('not a replay', () => pm.expect(pm.response.headers.has('Idempotent-Replayed')).to.be.false);",
+              "pm.collectionVariables.set('idempotentPatient', pm.response.text());"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idempotencyKey}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Nina\",\n  \"lastName\": \"Horvat\",\n  \"dateOfBirth\": \"1990-03-15\",\n  \"gender\": \"female\",\n  \"contact\": {\n    \"email\": \"nina.horvat@example.com\"\n  },\n  \"consents\": {\n    \"dataProcessing\": true\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "13. POST the same request and Idempotency-Key again -> the original 201, replayed",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201, not 409 DUPLICATE_PATIENT', () => pm.response.to.have.status(201));",
+              "pm.test('marked as replayed', () => pm.expect(pm.response.headers.get('Idempotent-Replayed')).to.eql('true'));",
+              "pm.test('same body as the first response', () => pm.expect(pm.response.json()).to.eql(JSON.parse(pm.collectionVariables.get('idempotentPatient'))));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Correlation-ID",
+            "value": "{{correlationId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idempotencyKey}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/patients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "patients"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Nina\",\n  \"lastName\": \"Horvat\",\n  \"dateOfBirth\": \"1990-03-15\",\n  \"gender\": \"female\",\n  \"contact\": {\n    \"email\": \"nina.horvat@example.com\"\n  },\n  \"consents\": {\n    \"dataProcessing\": true\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         }
       }
     }

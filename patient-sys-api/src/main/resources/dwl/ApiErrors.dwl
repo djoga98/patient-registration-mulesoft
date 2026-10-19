@@ -7,18 +7,20 @@
  */
 
 var catalogue = {
-    BAD_REQUEST:            { status: 400, message: "The request does not match the API specification." },
-    RESOURCE_NOT_FOUND:     { status: 404, message: "The requested resource does not exist." },
-    METHOD_NOT_ALLOWED:     { status: 405, message: "The HTTP method is not supported for this resource." },
-    NOT_ACCEPTABLE:         { status: 406, message: "The requested response media type is not supported." },
-    UNSUPPORTED_MEDIA_TYPE: { status: 415, message: "The request media type is not supported." },
-    PATIENT_NOT_FOUND:      { status: 404, message: "No patient exists with the given patient ID." },
-    DUPLICATE_PATIENT:      { status: 409, message: "A patient with the same name and date of birth already exists." },
-    INVALID_BIRTH_DATE:     { status: 422, message: "Date of birth must not be in the future." },
-    CONSENT_REQUIRED:       { status: 422, message: "Consent to data processing is required for registration." },
-    INTERNAL_ERROR:         { status: 500, message: "An unexpected error occurred." },
-    NOT_IMPLEMENTED:        { status: 501, message: "The operation is not implemented." },
-    DOWNSTREAM_ERROR:       { status: 502, message: "A downstream service is unavailable or did not respond in time." }
+    BAD_REQUEST:                 { status: 400, message: "The request does not match the API specification." },
+    RESOURCE_NOT_FOUND:          { status: 404, message: "The requested resource does not exist." },
+    METHOD_NOT_ALLOWED:          { status: 405, message: "The HTTP method is not supported for this resource." },
+    NOT_ACCEPTABLE:              { status: 406, message: "The requested response media type is not supported." },
+    UNSUPPORTED_MEDIA_TYPE:      { status: 415, message: "The request media type is not supported." },
+    PATIENT_NOT_FOUND:           { status: 404, message: "No patient exists with the given patient ID." },
+    DUPLICATE_PATIENT:           { status: 409, message: "A patient with the same name and date of birth already exists." },
+    INVALID_BIRTH_DATE:          { status: 422, message: "Date of birth must not be in the future." },
+    CONSENT_REQUIRED:            { status: 422, message: "Consent to data processing is required for registration." },
+    IDEMPOTENCY_KEY_MISMATCH:    { status: 422, message: "The Idempotency-Key was already used for a different request." },
+    IDEMPOTENCY_KEY_IN_PROGRESS: { status: 409, message: "A request with the same Idempotency-Key is still being processed." },
+    INTERNAL_ERROR:              { status: 500, message: "An unexpected error occurred." },
+    NOT_IMPLEMENTED:             { status: 501, message: "The operation is not implemented." },
+    DOWNSTREAM_ERROR:            { status: 502, message: "A downstream service is unavailable or did not respond in time." }
 }
 
 /**

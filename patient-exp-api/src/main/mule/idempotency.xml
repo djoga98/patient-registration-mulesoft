@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!--
+      Idempotency-Key on POST /api/patients (optional header).
+
+      A repeated key returns the original response (status, body, Location) without
+      calling the Process API again, marked with Idempotent-Replayed: true. This makes the
+      portal's POST safe to retry after a lost response, which the APIs themselves never
+      do (POST is not retried, see process-api-client.xml).
+
+      1. The key is claimed atomically: os:store with failIfPresent stores an IN_PROGRESS
+         entry, so of two concurrent requests with one key only one proceeds.
+      2. Only a 201 is remembered (COMPLETED entry). Any error releases the key, so the
+         caller can retry: 4xx answers are deterministic and come back the same, and a
+         5xx/502 is exactly the case a retry is for.
+      3. A key that is already stored is decided by dwl::Idempotency::decide: replay,
+         409 IDEMPOTENCY_KEY_IN_PROGRESS, 422 IDEMPOTENCY_KEY_MISMATCH (same key,
+         different body), or claim again when the entry is an abandoned IN_PROGRESS.
+
+      The key and the stored response are never logged. Entries expire after
+      idempotency.ttlHours. The store is persistent: on CloudHub 2.0 that is Object Store
+      v2 (enabled in the cloudhub2 deployment profile), shared by all replicas.
+    -->
+
+    <os:object-store name="idempotency-store"
+                     doc:name="Idempotency store"
+                     doc:description="Persistent store of Idempotency-Key entries; Object Store v2 on CloudHub 2.0"
+                     persistent="true"
+                     entryTtl="${idempotency.ttlHours}"
+                     entryTtlUnit="HOURS"/>
+
+    <sub-flow name="register-patient-idempotently"
+              doc:name="register-patient-idempotently"
+              doc:description="Registers once per Idempotency-Key; repeats get the stored response">
+        <ee:transform doc:name="Idempotency context"
+                      doc:description="Keeps the key and the fingerprint of the request body">
+            <ee:variables>
+                <ee:set-variable variableName="idempotencyKey"><![CDATA[%dw 2.0
+output application/java
+---
+attributes.headers['idempotency-key']]]></ee:set-variable>
+                <ee:set-variable variableName="requestHash"><![CDATA[%dw 2.0
+import fingerprint from dwl::Idempotency
+output application/java
+---
+fingerprint(payload)]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <try doc:name="Claim the key"
+             doc:description="Stores an IN_PROGRESS entry unless the key already exists">
+            <os:store objectStore="idempotency-store" key="#[vars.idempotencyKey]" failIfPresent="true"
+                      doc:name="Store IN_PROGRESS"
+                      doc:description="Atomic: fails with OS:KEY_ALREADY_EXISTS when the key is taken">
+                <os:value><![CDATA[#[output application/java --- dwl::Idempotency::inProgressEntry(vars.requestHash, now())]]]></os:value>
+            </os:store>
+            <set-variable variableName="keyClaimed" value="#[true]"
+                          doc:name="Claimed"
+                          doc:description="This request owns the key"/>
+            <error-handler>
+                <on-error-continue type="OS:KEY_ALREADY_EXISTS" logException="false"
+                                   doc:name="Key already stored"
+                                   doc:description="Another request used this key before">
+                    <set-variable variableName="keyClaimed" value="#[false]"
+                                  doc:name="Not claimed"
+                                  doc:description="The stored entry decides the answer"/>
+                </on-error-continue>
+            </error-handler>
+        </try>
+        <choice doc:name="Key claimed?"
+                doc:description="Process, or decide from the stored entry">
+            <when expression="#[vars.keyClaimed]"
+                  doc:name="New key"
+                  doc:description="First request with this key">
+                <flow-ref name="register-and-remember"
+                          doc:name="Register and remember"
+                          doc:description="Registers the patient and stores the response for the key"/>
+            </when>
+            <otherwise doc:name="Known key"
+                       doc:description="The key was used before">
+                <os:retrieve objectStore="idempotency-store" key="#[vars.idempotencyKey]" target="storedEntry"
+                             doc:name="Read stored entry"
+                             doc:description="Reads the entry; one that expired meanwhile reads as ABSENT">
+                    <os:default-value><![CDATA[#[output application/java --- { state: 'ABSENT' }]]]></os:default-value>
+                </os:retrieve>
+                <set-variable variableName="idempotencyDecision"
+                              value="#[dwl::Idempotency::decide(vars.storedEntry, vars.requestHash, now(), (p('idempotency.inProgressTimeoutSeconds') as Number) * 1000)]"
+                              doc:name="Decide"
+                              doc:description="REPLAY, MISMATCH, IN_PROGRESS or CLAIM"/>
+                <logger level="INFO" category="com.acme.patient.exp"
+                        message="#[dwl::LogEvent::event('idempotency.key.reused', vars.correlationId, { decision: vars.idempotencyDecision })]"
+                        doc:name="Log decision"
+                        doc:description="Logs the decision (never the key)"/>
+                <choice doc:name="Decision"
+                        doc:description="Answers from the stored entry or claims the key again">
+                    <when expression="#[vars.idempotencyDecision == 'REPLAY']"
+                          doc:name="Replay"
+                          doc:description="Same request completed before: return its response">
+                        <ee:transform doc:name="Stored response"
+                                      doc:description="The original status, body and Location, marked as replayed">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+read(vars.storedEntry.body, "application/json")]]></ee:set-payload>
+                            </ee:message>
+                            <ee:variables>
+                                <ee:set-variable variableName="httpStatus"><![CDATA[%dw 2.0
+output application/java
+---
+vars.storedEntry.status]]></ee:set-variable>
+                                <ee:set-variable variableName="outboundHeaders"><![CDATA[%dw 2.0
+output application/java
+---
+{ Location: vars.storedEntry.location, 'Idempotent-Replayed': 'true' }]]></ee:set-variable>
+                            </ee:variables>
+                        </ee:transform>
+                    </when>
+                    <when expression="#[vars.idempotencyDecision == 'MISMATCH']"
+                          doc:name="Different request"
+                          doc:description="The key was used for another body">
+                        <raise-error type="APP:IDEMPOTENCY_KEY_MISMATCH"
+                                     description="Idempotency-Key reused with a different request body"
+                                     doc:name="Raise IDEMPOTENCY_KEY_MISMATCH"
+                                     doc:description="Signals key reuse for a different request (422)"/>
+                    </when>
+                    <when expression="#[vars.idempotencyDecision == 'IN_PROGRESS']"
+                          doc:name="Still running"
+                          doc:description="The first request with this key has not finished">
+                        <raise-error type="APP:IDEMPOTENCY_KEY_IN_PROGRESS"
+                                     description="A request with this Idempotency-Key is in progress"
+                                     doc:name="Raise IDEMPOTENCY_KEY_IN_PROGRESS"
+                                     doc:description="Signals a concurrent duplicate (409)"/>
+                    </when>
+                    <otherwise doc:name="Claim again"
+                               doc:description="Expired or abandoned entry: this request takes the key over">
+                        <os:store objectStore="idempotency-store" key="#[vars.idempotencyKey]"
+                                  doc:name="Store IN_PROGRESS"
+                                  doc:description="Replaces the abandoned entry">
+                            <os:value><![CDATA[#[output application/java --- dwl::Idempotency::inProgressEntry(vars.requestHash, now())]]]></os:value>
+                        </os:store>
+                        <flow-ref name="register-and-remember"
+                                  doc:name="Register and remember"
+                                  doc:description="Registers the patient and stores the response for the key"/>
+                    </otherwise>
+                </choice>
+            </otherwise>
+        </choice>
+    </sub-flow>
+
+    <sub-flow name="register-and-remember"
+              doc:name="register-and-remember"
+              doc:description="Registers the patient; on success stores the response for the key, on error releases the key">
+        <try doc:name="Register"
+             doc:description="Releases the key when the registration fails">
+            <flow-ref name="register-patient"
+                      doc:name="Register patient"
+                      doc:description="The registration without Idempotency-Key handling"/>
+            <error-handler>
+                <on-error-propagate type="ANY" logException="false"
+                                    doc:name="Registration failed"
+                                    doc:description="Removes the IN_PROGRESS entry so the caller can retry, then propagates the error">
+                    <flow-ref name="release-idempotency-key"
+                              doc:name="Release key"
+                              doc:description="Removes the entry for the key"/>
+                </on-error-propagate>
+            </error-handler>
+        </try>
+        <os:store objectStore="idempotency-store" key="#[vars.idempotencyKey]"
+                  doc:name="Store COMPLETED"
+                  doc:description="Remembers status, body and Location for later requests with the key">
+            <os:value><![CDATA[#[output application/java --- dwl::Idempotency::completedEntry(vars.requestHash, vars.httpStatus, vars.outboundHeaders.Location, payload, now())]]]></os:value>
+        </os:store>
+    </sub-flow>
+
+    <sub-flow name="release-idempotency-key"
+              doc:name="release-idempotency-key"
+              doc:description="Removes the key's entry; a failure to remove is logged and otherwise ignored">
+        <try doc:name="Remove entry"
+             doc:description="Best effort: the original error is what the caller must see">
+            <os:remove objectStore="idempotency-store" key="#[vars.idempotencyKey]"
+                       doc:name="Remove entry"
+                       doc:description="Deletes the IN_PROGRESS entry"/>
+            <error-handler>
+                <on-error-continue type="ANY" logException="false"
+                                   doc:name="Remove failed"
+                                   doc:description="The entry expires as abandoned after idempotency.inProgressTimeoutSeconds">
+                    <logger level="WARN" category="com.acme.patient.exp"
+                            message="#[dwl::LogEvent::event('idempotency.key.release_failed', vars.correlationId, { errorType: dwl::ApiErrors::qualifiedName(error.errorType) })]"
+                            doc:name="Log release failure"
+                            doc:description="Logs the error type (never the key)"/>
+                </on-error-continue>
+            </error-handler>
+        </try>
+    </sub-flow>
+</mule>

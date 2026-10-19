@@ -253,7 +253,35 @@ for SQL failures; the live failure-mode script asserts it for an outage.
   patient's own data, or into a double registration if the lower layer were not
   idempotent.**
 
-## Correlation ID and logging
+### Idempotency-Key on the Experience POST (bonus)
+
+The **caller** can make its POST safe to retry. It sends an optional
+`Idempotency-Key` header (1-64 characters `A-Z a-z 0-9 . _ : -`; a UUID is recommended).
+A repeat with the same key and body returns the **original response** (status, body,
+`Location`) without registering again. The repeat carries `Idempotent-Replayed: true`
+and its own `X-Correlation-ID`. Implementation: `patient-exp-api/src/main/mule/idempotency.xml`
+and `dwl/Idempotency.dwl`.
+
+| Situation | Answer |
+|---|---|
+| New key | processed. A `201` is stored for 24 h (`idempotency.ttlHours`). |
+| Same key, same body, completed | the stored 201 is replayed. The Process API is not called. |
+| Same key, same body, first request still running | `409 IDEMPOTENCY_KEY_IN_PROGRESS` |
+| Same key, different body | `422 IDEMPOTENCY_KEY_MISMATCH`. The key is bound to a SHA-256 fingerprint of the canonical JSON body (key order does not matter). |
+| First request failed (4xx/5xx) | the key is released, so a retry is processed again. Only a 201 is remembered. |
+| `IN_PROGRESS` older than 60 s (`idempotency.inProgressTimeoutSeconds`, more than the 20 s POST timeout) | treated as abandoned, e.g. the runtime stopped mid-request. The next request claims the key. |
+
+- **Atomic claim.** The key is claimed with `os:store failIfPresent="true"` (an
+  `IN_PROGRESS` entry), so of two concurrent requests with one key only one proceeds.
+- **Persistent store.** It is a persistent Object Store. On CloudHub 2.0 that is
+  **Object Store v2** (`<integrations><services><objectStoreV2>` in the deployment
+  profile), shared by replicas and kept across restarts.
+- **Personal data in the store.** The stored body is the portal view, which is personal
+  data: it lives in the store for at most 24 h. The key and the body are never logged.
+- **Limit.** A request whose response is lost after the Process API committed, and which
+  then fails in the Experience API itself, is released. Its retry gets
+  `409 DUPLICATE_PATIENT`. End-to-end exactly-once would need the key to reach the
+  System API.
 
 - The Experience API takes `X-Correlation-ID` from the caller. When the header is
   missing, the event's correlation ID is used, generated as a UUID
@@ -432,8 +460,8 @@ With more time:
 
 - A shared Exchange library for the common DataWeave modules and the error/logging
   sub-flows.
-- An `Idempotency-Key` on the Experience POST, backed by Object Store v2. This would make
-  POST safely retryable and is a natural next step given the no-retry rule.
+- Pass the `Idempotency-Key` down to the System API, and store it with the record, for
+  exactly-once registration even when a response is lost between layers.
 - Client ID enforcement on the Process and System APIs (API Manager), and mTLS or
   private-space ingress for the System API.
 - OpenTelemetry tracing across the hops.

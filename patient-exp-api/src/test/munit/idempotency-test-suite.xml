@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!--
+      Idempotency-Key on POST /api/patients, through the real listener and APIkit router
+      with the real (persistent) idempotency store. The Process API is mocked. Every test
+      uses its own random key, so tests (and repeated runs) never see each other's entries.
+    -->
+    <munit:config name="idempotency-test-suite.xml"/>
+
+    <http:request-config name="idempotency-test-http-client">
+        <http:request-connection host="localhost" port="${http.port}"/>
+    </http:request-config>
+
+    <!-- POSTs payload. Inputs: vars.idempotencyKeyHeader (optional), vars.callCorrelationId. -->
+    <sub-flow name="post-registration">
+        <http:request config-ref="idempotency-test-http-client" method="POST" path="/api/patients">
+            <http:headers><![CDATA[#[{ 'Content-Type': 'application/json', 'X-Correlation-ID': vars.callCorrelationId default uuid() }
+                ++ (if (vars.idempotencyKeyHeader != null) { 'Idempotency-Key': vars.idempotencyKeyHeader } else {})]]]></http:headers>
+            <http:response-validator>
+                <http:success-status-code-validator values="100..599"/>
+            </http:response-validator>
+        </http:request>
+    </sub-flow>
+
+    <munit:test name="repeated-key-replays-the-original-response-without-registering-again"
+                description="The second POST with the same key and body gets the first 201 (body, Location) marked as replayed; the Process API is called once">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-patient-case1.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 201 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="idempotencyKeyHeader" value="#['idem-replay-' ++ uuid()]"/>
+            <set-variable variableName="callCorrelationId" value="idem-first"/>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+            <set-variable variableName="first"
+                          value="#[output application/java --- { status: attributes.statusCode, location: attributes.headers.location, replayed: attributes.headers.'idempotent-replayed', body: payload }]"/>
+            <set-variable variableName="callCorrelationId" value="idem-second"/>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[vars.first.status]" expected="#[201]"/>
+            <munit-tools:assert-equals actual="#[vars.first.replayed]" expected="#[null]" message="The first response is not a replay"/>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[201]"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'idempotent-replayed']" expected="#['true']"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.location]" expected="#[vars.first.location]"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'x-correlation-id']" expected="#['idem-second']"
+                                       message="The replay carries the correlation ID of its own request"/>
+            <munit-tools:assert-equals actual="#[payload orderBy $$]" expected="#[vars.first.body orderBy $$]"
+                                       message="The body is the original response"/>
+            <munit-tools:verify-call processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="same-key-with-a-different-body-returns-422"
+                description="A key used for one registration cannot replay it for another body: 422 IDEMPOTENCY_KEY_MISMATCH">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-patient-case1.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 201 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="idempotencyKeyHeader" value="#['idem-mismatch-' ++ uuid()]"/>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+            <set-variable variableName="callCorrelationId" value="idem-mismatch"/>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case2-luka.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[422]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['IDEMPOTENCY_KEY_MISMATCH']"/>
+            <munit-tools:assert-equals actual="#[payload.error.correlationId]" expected="#['idem-mismatch']"/>
+            <munit-tools:verify-call processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="failed-registration-releases-the-key"
+                description="Only a 201 is remembered: after an error the same key is processed again">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:TIMEOUT"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="idempotencyKeyHeader" value="#['idem-release-' ++ uuid()]"/>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+            <set-variable variableName="firstStatus" value="#[attributes.statusCode]"/>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[vars.firstStatus]" expected="#[502]"/>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[502]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['DOWNSTREAM_ERROR']"
+                                       message="Not IDEMPOTENCY_KEY_IN_PROGRESS: the failed request released the key"/>
+            <munit-tools:verify-call processor="http:request" times="2">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="key-release-failure-keeps-the-original-error"
+                description="If the store cannot remove the key after a failed registration, the caller still gets the registration's error">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-error-consent_required.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 422 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="os:remove">
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="OS:KEY_NOT_FOUND"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="idempotencyKeyHeader" value="#['idem-unreleased-' ++ uuid()]"/>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case2-luka.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[422]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['CONSENT_REQUIRED']"/>
+            <munit-tools:verify-call processor="os:remove" times="1"/>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="key-still-in-progress-returns-409"
+                description="While the first request with a key runs, a repeat gets 409 IDEMPOTENCY_KEY_IN_PROGRESS and is not processed">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-variable variableName="idempotencyKeyHeader" value="#['idem-running-' ++ uuid()]"/>
+            <os:store objectStore="idempotency-store" key="#[vars.idempotencyKeyHeader]">
+                <os:value><![CDATA[#[output application/java --- dwl::Idempotency::inProgressEntry(
+                    dwl::Idempotency::fingerprint(readUrl('classpath://samples/portal-case1-ana.json', 'application/json')), now())]]]></os:value>
+            </os:store>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[409]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['IDEMPOTENCY_KEY_IN_PROGRESS']"/>
+            <munit-tools:verify-call processor="http:request" times="0">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="abandoned-in-progress-key-is-claimed-again"
+                description="An IN_PROGRESS entry older than the in-progress timeout (runtime stopped mid-request) no longer blocks the key">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-patient-case1.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 201 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="idempotencyKeyHeader" value="#['idem-abandoned-' ++ uuid()]"/>
+            <os:store objectStore="idempotency-store" key="#[vars.idempotencyKeyHeader]">
+                <os:value><![CDATA[#[output application/java --- dwl::Idempotency::inProgressEntry(
+                    dwl::Idempotency::fingerprint(readUrl('classpath://samples/portal-case1-ana.json', 'application/json')), now() - |PT10M|)]]]></os:value>
+            </os:store>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+            <set-variable variableName="firstStatus" value="#[attributes.statusCode]"/>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[vars.firstStatus]" expected="#[201]"/>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[201]"/>
+            <munit-tools:assert-equals actual="#[attributes.headers.'idempotent-replayed']" expected="#['true']"
+                                       message="The claimed key now replays the completed response"/>
+            <munit-tools:verify-call processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="malformed-key-returns-400"
+                description="The key must be 1-64 characters of A-Z a-z 0-9 . _ : -">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-variable variableName="idempotencyKeyHeader" value="not a valid key!"/>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[400]"/>
+            <munit-tools:assert-equals actual="#[payload.error.code]" expected="#['BAD_REQUEST']"/>
+            <munit-tools:verify-call processor="http:request" times="0">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="without-key-every-post-is-processed"
+                description="Without the header nothing is remembered: two POSTs are two registration attempts">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="post:\patients:application\json:patient-exp-api-config"/>
+        </munit:enable-flow-sources>
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[MunitTools::getResourceAsString('samples/process-patient-case1.json')]" mediaType="application/json"/>
+                    <munit-tools:attributes value="#[{ statusCode: 201 }]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+            <set-payload value="#[MunitTools::getResourceAsString('samples/portal-case1-ana.json')]" mimeType="application/json"/>
+            <flow-ref name="post-registration"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.headers.'idempotent-replayed']" expected="#[null]"/>
+            <munit-tools:verify-call processor="http:request" times="2">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="process-api-request-config"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+</mule>
