@@ -64,6 +64,9 @@
                     </systemPropertyVariables>
                     <coverage>
                         <runCoverage>true</runCoverage>
+                        <!-- The build fails below this application coverage. -->
+                        <failBuild>true</failBuild>
+                        <requiredApplicationCoverage>90</requiredApplicationCoverage>
                         <formats>
                             <format>console</format>
                             <format>html</format>
