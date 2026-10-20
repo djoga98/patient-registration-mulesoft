@@ -81,8 +81,8 @@ Variables:
 | `ANYPOINT_BUSINESS_GROUP_ID` | organization / business group ID |
 | `CLOUDHUB_ENVIRONMENT` | e.g. `Sandbox` (default) |
 | `CLOUDHUB_TARGET` | e.g. `Cloudhub-US-East-2` (default) |
-| `CLOUDHUB_MULE_VERSION` | default `4.12.3`; a 4.12.x version Runtime Manager offers |
-| `CLOUDHUB_RELEASE_CHANNEL` | default `EDGE` (4.12 is an Edge release) |
+| `CLOUDHUB_MULE_VERSION` | default `4.12.5`; a 4.12.x version Runtime Manager offers |
+| `CLOUDHUB_RELEASE_CHANNEL` | default `LTS` (4.12 is a long-term support release) |
 | `SYS_API_HOST`, `PRC_API_HOST` | CloudHub hosts, filled in during the first rollout (step 5) |
 | `CLOUDHUB_DEPLOY_ENABLED` | `true` to switch deployment on |
 | `SYS_API_ID`, `PRC_API_ID` | *optional*, API Manager instance IDs for Client ID Enforcement ([api-manager.md](api-manager.md)). Empty: the APIs are deployed unmanaged (placeholder ID, gatekeeper disabled). |
