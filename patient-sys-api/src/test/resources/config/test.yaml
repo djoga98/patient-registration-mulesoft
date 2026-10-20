@@ -4,3 +4,7 @@ http:
 
 db:
   url: "jdbc:postgresql://localhost:1/munit-never-connects"
+
+api:
+  # No API Manager pairing here (no platform credentials); placeholder instance ID.
+  id: "0"

@@ -6,3 +6,5 @@
 # Credentials come from config/secure-dev.yaml (ciphertext only).
 http:
   port: "8081"
+#
+# api.id is a deployment property: the API Manager instance ID (docs/api-manager.md).

@@ -130,7 +130,7 @@
         mvn -P cloudhub2 deploy -DmuleDeploy
       publishes the application to Exchange (groupId must be the business group ID; the
       workflow sets it) and deploys it. Credentials come from environment variables that
-      the workflow fills from GitHub Secrets. This application has no secure properties.
+      the workflow fills from GitHub Secrets; the client secret is a secure property.
     -->
     <profiles>
         <profile>
@@ -189,7 +189,12 @@
                                 <properties>
                                     <env>${cloudhub.env}</env>
                                     <processApi.host>${env.PRC_API_HOST}</processApi.host>
+                                    <!-- This app's client application for the Process API (empty: none sent). -->
+                                    <processApi.clientId>${env.PRC_API_CLIENT_ID}</processApi.clientId>
                                 </properties>
+                                <secureProperties>
+                                    <processApi.clientSecret>${env.PRC_API_CLIENT_SECRET}</processApi.clientSecret>
+                                </secureProperties>
                             </cloudhub2Deployment>
                         </configuration>
                     </plugin>

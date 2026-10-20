@@ -7,3 +7,6 @@ http:
 processApi:
   protocol: "HTTPS"
   port: "443"
+# processApi.clientId and processApi.clientSecret (secure) are deployment properties:
+# this app's client application for the Process API (docs/api-manager.md).
+# Empty client ID: no credentials are sent.

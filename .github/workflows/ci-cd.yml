@@ -93,6 +93,14 @@ jobs:
       DB_URL: ${{ secrets.DB_URL }}
       SYS_API_HOST: ${{ vars.SYS_API_HOST }}
       PRC_API_HOST: ${{ vars.PRC_API_HOST }}
+      # Client ID Enforcement (optional, docs/api-manager.md): API Manager instance IDs and
+      # the client applications the Process / Experience APIs call the layer below with.
+      SYS_API_ID: ${{ vars.SYS_API_ID }}
+      PRC_API_ID: ${{ vars.PRC_API_ID }}
+      SYS_API_CLIENT_ID: ${{ secrets.SYS_API_CLIENT_ID }}
+      SYS_API_CLIENT_SECRET: ${{ secrets.SYS_API_CLIENT_SECRET }}
+      PRC_API_CLIENT_ID: ${{ secrets.PRC_API_CLIENT_ID }}
+      PRC_API_CLIENT_SECRET: ${{ secrets.PRC_API_CLIENT_SECRET }}
       VERSION: 1.0.${{ github.run_number }}
       CLOUDHUB_ENVIRONMENT: ${{ vars.CLOUDHUB_ENVIRONMENT || 'Sandbox' }}
       CLOUDHUB_TARGET: ${{ vars.CLOUDHUB_TARGET || 'Cloudhub-US-East-2' }}
@@ -122,6 +130,13 @@ jobs:
           # deployed once the host of the layer below it is known (docs/deployment.md).
           [ -n "$SYS_API_HOST" ] || echo "::warning::SYS_API_HOST not set: deploying patient-sys-api only"
           [ -n "$PRC_API_HOST" ] || echo "::warning::PRC_API_HOST not set: patient-exp-api will not be deployed"
+          # A managed API rejects calls without credentials, so its caller must have them.
+          if [ -n "$SYS_API_ID" ] && [ -z "$SYS_API_CLIENT_ID" ]; then
+            echo "::error::SYS_API_ID is set but SYS_API_CLIENT_ID is not: patient-prc-api could not call patient-sys-api"; missing=1
+          fi
+          if [ -n "$PRC_API_ID" ] && [ -z "$PRC_API_CLIENT_ID" ]; then
+            echo "::error::PRC_API_ID is set but PRC_API_CLIENT_ID is not: patient-exp-api could not call patient-prc-api"; missing=1
+          fi
           if [ ! -f patient-sys-api/src/main/resources/config/secure-dev.yaml ]; then
             echo "::error::patient-sys-api/src/main/resources/config/secure-dev.yaml is missing (scripts/generate-cloud-secrets.sh)"
             missing=1

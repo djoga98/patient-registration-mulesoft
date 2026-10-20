@@ -558,6 +558,46 @@
 
     <!-- ========================================================================= GET -->
 
+    <!-- ============================================ Client ID Enforcement credentials -->
+
+    <!-- Stub System API on the configured System API port: 200 with a record only when the
+         request carries this app's client credentials (as the API Manager policy would),
+         otherwise 401. Its source is enabled only in the test below. -->
+    <http:listener-config name="stub-system-api-listener">
+        <http:listener-connection host="localhost" port="${systemApi.port}"/>
+    </http:listener-config>
+
+    <flow name="stub-system-api">
+        <http:listener config-ref="stub-system-api-listener" path="/api/*">
+            <http:response statusCode="#[vars.stubStatus]"/>
+            <http:error-response statusCode="500"/>
+        </http:listener>
+        <set-variable variableName="stubStatus"
+                      value="#[if (attributes.headers.client_id == 'munit-prc-client' and attributes.headers.client_secret == 'munit-prc-secret') 200 else 401]"/>
+        <set-payload mimeType="application/json"
+                     value="#[if (vars.stubStatus == 200) MunitTools::getResourceAsString('samples/system-record-case1.json') else '{}']"/>
+    </flow>
+
+    <munit:test name="system-api-calls-carry-the-client-credentials"
+                description="Requests to the System API send client_id and client_secret, as Client ID Enforcement on the System API requires">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-prc-api-main"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-prc-api-config"/>
+            <munit:enable-flow-source value="stub-system-api"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <flow-ref name="call-prc-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[200]"
+                                       message="The stub answers 401 (502 here) when the credentials are missing or wrong"/>
+            <munit-tools:assert-equals actual="#[payload.patientId]" expected="#['PAT-000123']"/>
+        </munit:validation>
+    </munit:test>
+
     <!-- ================================================ GET /api/patients?lastName= -->
 
     <munit:test name="search-normalises-last-name-and-maps-records"

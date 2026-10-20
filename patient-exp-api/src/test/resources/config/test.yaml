@@ -1,4 +1,5 @@
-# MUnit only. Every call to the Process API is mocked; nothing listens on 18182.
+# MUnit only. Calls to the Process API are mocked, except in the client-credentials
+# test, where a stub in the suite listens on 18182.
 http:
   port: "18081"
 
@@ -6,3 +7,6 @@ processApi:
   protocol: "HTTP"
   host: "localhost"
   port: "18182"
+  # Checked by the stub Process API in the MUnit suite (client-credentials tests).
+  clientId: "munit-exp-client"
+  clientSecret: "munit-exp-secret"

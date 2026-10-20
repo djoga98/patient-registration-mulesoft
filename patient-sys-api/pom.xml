@@ -158,6 +158,11 @@
                 <cloudhub.releaseChannel>EDGE</cloudhub.releaseChannel>
                 <cloudhub.applicationName>${project.artifactId}</cloudhub.applicationName>
                 <cloudhub.env>dev</cloudhub.env>
+                <!-- API Manager instance ID (autodiscovery) and gatekeeper mode. Without an
+                     instance (0) the gatekeeper must be disabled, or the API is blocked (503);
+                     .github/scripts/deploy-app.sh sets both from SYS_API_ID / PRC_API_ID. -->
+                <cloudhub.apiId>0</cloudhub.apiId>
+                <cloudhub.gatekeeper>disabled</cloudhub.gatekeeper>
             </properties>
             <distributionManagement>
                 <repository>
@@ -194,6 +199,8 @@
                                 <deploymentTimeout>900000</deploymentTimeout>
                                 <properties>
                                     <env>${cloudhub.env}</env>
+                                    <api.id>${cloudhub.apiId}</api.id>
+                                    <anypoint.platform.gatekeeper>${cloudhub.gatekeeper}</anypoint.platform.gatekeeper>
                                 </properties>
                                 <secureProperties>
                                     <secure.key>${env.MULE_SECURE_KEY}</secure.key>

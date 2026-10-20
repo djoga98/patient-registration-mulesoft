@@ -39,7 +39,8 @@
                       sendCorrelationId="NEVER"
                       doc:name="POST /patients"
                       doc:description="Registers the patient; every status is returned for explicit interpretation">
-            <http:headers><![CDATA[#[{ 'X-Correlation-ID': vars.correlationId, 'Content-Type': 'application/json' }]]]></http:headers>
+            <http:headers><![CDATA[#[{ 'X-Correlation-ID': vars.correlationId, 'Content-Type': 'application/json' }
+                ++ dwl::Downstream::clientCredentialHeaders(p('processApi.clientId'), p('processApi.clientSecret'))]]]></http:headers>
             <http:response-validator>
                 <http:success-status-code-validator values="100..599"/>
             </http:response-validator>
@@ -68,7 +69,8 @@
                           sendCorrelationId="NEVER"
                           doc:name="GET /patients/{patientId}"
                           doc:description="Reads the patient; only 503 raises an error so only transient failures are retried">
-                <http:headers><![CDATA[#[{ 'X-Correlation-ID': vars.correlationId }]]]></http:headers>
+                <http:headers><![CDATA[#[{ 'X-Correlation-ID': vars.correlationId }
+                ++ dwl::Downstream::clientCredentialHeaders(p('processApi.clientId'), p('processApi.clientSecret'))]]]></http:headers>
                 <http:uri-params><![CDATA[#[{ patientId: vars.patientId }]]]></http:uri-params>
                 <http:response-validator>
                     <http:failure-status-code-validator values="503"/>
@@ -100,7 +102,8 @@
                           sendCorrelationId="NEVER"
                           doc:name="GET /patients?lastName="
                           doc:description="Searches the patients; only 503 raises an error so only transient failures are retried">
-                <http:headers><![CDATA[#[{ 'X-Correlation-ID': vars.correlationId }]]]></http:headers>
+                <http:headers><![CDATA[#[{ 'X-Correlation-ID': vars.correlationId }
+                ++ dwl::Downstream::clientCredentialHeaders(p('processApi.clientId'), p('processApi.clientSecret'))]]]></http:headers>
                 <http:query-params><![CDATA[#[{ lastName: vars.lastName }]]]></http:query-params>
                 <http:response-validator>
                     <http:failure-status-code-validator values="503"/>

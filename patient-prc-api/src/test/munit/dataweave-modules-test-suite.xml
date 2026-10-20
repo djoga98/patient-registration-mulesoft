@@ -316,4 +316,26 @@ var message = event("response.sent", "cid-1", { status: 201, path: "/api/patient
             <munit-tools:assert-equals actual="#[payload.elapsedIsNonNegative]" expected="#[true]"/>
         </munit:validation>
     </munit:test>
+
+    <munit:test name="client-credential-headers-only-when-configured"
+                description="client_id and client_secret are sent only when a client ID is configured">
+        <munit:execution>
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+import clientCredentialHeaders from dwl::Downstream
+output application/json
+---
+[
+    clientCredentialHeaders("app-1", "s3cret"),
+    clientCredentialHeaders("", "s3cret"),
+    clientCredentialHeaders(null, null)
+]]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[payload]" expected="#[[ { client_id: 'app-1', client_secret: 's3cret' }, {}, {} ]]"/>
+        </munit:validation>
+    </munit:test>
 </mule>

@@ -605,6 +605,46 @@
         </munit:validation>
     </munit:test>
 
+    <!-- ============================================ Client ID Enforcement credentials -->
+
+    <!-- Stub Process API on the configured Process API port: 200 with a patient only when the
+         request carries this app's client credentials (as the API Manager policy would),
+         otherwise 401. Its source is enabled only in the test below. -->
+    <http:listener-config name="stub-process-api-listener">
+        <http:listener-connection host="localhost" port="${processApi.port}"/>
+    </http:listener-config>
+
+    <flow name="stub-process-api">
+        <http:listener config-ref="stub-process-api-listener" path="/api/*">
+            <http:response statusCode="#[vars.stubStatus]"/>
+            <http:error-response statusCode="500"/>
+        </http:listener>
+        <set-variable variableName="stubStatus"
+                      value="#[if (attributes.headers.client_id == 'munit-exp-client' and attributes.headers.client_secret == 'munit-exp-secret') 200 else 401]"/>
+        <set-payload mimeType="application/json"
+                     value="#[if (vars.stubStatus == 200) MunitTools::getResourceAsString('samples/process-patient-case1.json') else '{}']"/>
+    </flow>
+
+    <munit:test name="process-api-calls-carry-the-client-credentials"
+                description="Requests to the Process API send client_id and client_secret, as Client ID Enforcement on the Process API requires">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="patient-exp-api-main"/>
+            <munit:enable-flow-source value="get:\patients\(patientId):patient-exp-api-config"/>
+            <munit:enable-flow-source value="stub-process-api"/>
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <set-payload value="#[null]"/>
+            <set-variable variableName="method" value="GET"/>
+            <set-variable variableName="path" value="/api/patients/PAT-000123"/>
+            <flow-ref name="call-exp-api"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-equals actual="#[attributes.statusCode]" expected="#[200]"
+                                       message="The stub answers 401 (502 here) when the credentials are missing or wrong"/>
+            <munit-tools:assert-equals actual="#[payload.fullName]" expected="#['Ana Kovač']"/>
+        </munit:validation>
+    </munit:test>
+
     <!-- ================================================ GET /api/patients?lastName= -->
 
     <munit:test name="search-forwards-last-name-unchanged-and-returns-portal-views"

@@ -122,7 +122,7 @@
         mvn -P cloudhub2 deploy -DmuleDeploy
       publishes the application to Exchange (groupId must be the business group ID; the
       workflow sets it) and deploys it. Credentials come from environment variables that
-      the workflow fills from GitHub Secrets. This application has no secure properties.
+      the workflow fills from GitHub Secrets; the client secret is a secure property.
     -->
     <profiles>
         <profile>
@@ -136,6 +136,11 @@
                 <cloudhub.releaseChannel>EDGE</cloudhub.releaseChannel>
                 <cloudhub.applicationName>${project.artifactId}</cloudhub.applicationName>
                 <cloudhub.env>dev</cloudhub.env>
+                <!-- API Manager instance ID (autodiscovery) and gatekeeper mode. Without an
+                     instance (0) the gatekeeper must be disabled, or the API is blocked (503);
+                     .github/scripts/deploy-app.sh sets both from SYS_API_ID / PRC_API_ID. -->
+                <cloudhub.apiId>0</cloudhub.apiId>
+                <cloudhub.gatekeeper>disabled</cloudhub.gatekeeper>
             </properties>
             <distributionManagement>
                 <repository>
@@ -173,7 +178,14 @@
                                 <properties>
                                     <env>${cloudhub.env}</env>
                                     <systemApi.host>${env.SYS_API_HOST}</systemApi.host>
+                                    <api.id>${cloudhub.apiId}</api.id>
+                                    <anypoint.platform.gatekeeper>${cloudhub.gatekeeper}</anypoint.platform.gatekeeper>
+                                    <!-- This app's client application for the System API (empty: none sent). -->
+                                    <systemApi.clientId>${env.SYS_API_CLIENT_ID}</systemApi.clientId>
                                 </properties>
+                                <secureProperties>
+                                    <systemApi.clientSecret>${env.SYS_API_CLIENT_SECRET}</systemApi.clientSecret>
+                                </secureProperties>
                             </cloudhub2Deployment>
                         </configuration>
                     </plugin>

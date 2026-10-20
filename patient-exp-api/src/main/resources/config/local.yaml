@@ -5,3 +5,6 @@ processApi:
   protocol: "HTTP"
   host: "localhost"
   port: "8082"
+  # Client ID Enforcement credentials of this app for the Process API; empty: none sent.
+  clientId: ""
+  clientSecret: ""

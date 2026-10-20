@@ -6,3 +6,7 @@ http:
 db:
   # connectTimeout / socketTimeout are pgjdbc settings, in seconds.
   url: "jdbc:postgresql://localhost:5432/patients?connectTimeout=5&socketTimeout=30&ApplicationName=patient-sys-api"
+
+api:
+  # No API Manager pairing here (no platform credentials); placeholder instance ID.
+  id: "0"

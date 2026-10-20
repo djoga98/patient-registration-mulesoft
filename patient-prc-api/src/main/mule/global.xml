@@ -2,12 +2,14 @@
 <mule xmlns="http://www.mulesoft.org/schema/mule/core"
       xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
       xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway"
       xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
       xmlns:sockets="http://www.mulesoft.org/schema/mule/sockets"
       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
       xsi:schemaLocation="
         http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
         http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd
         http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
         http://www.mulesoft.org/schema/mule/sockets http://www.mulesoft.org/schema/mule/sockets/current/mule-sockets.xsd">
 
@@ -42,6 +44,16 @@
                    api="patient-prc-api.raml"
                    outboundHeadersMapName="outboundHeaders"
                    httpStatusVarName="httpStatus"/>
+
+    <!--
+      API Manager pairing (Client ID Enforcement, docs/api-manager.md). api.id is the API
+      instance ID, a deployment property on CloudHub. The runtime only pairs when it is
+      started with Anypoint Platform credentials (anypoint.platform.client_id/secret);
+      locally and in MUnit there are none, so no policy applies there.
+    -->
+    <api-gateway:autodiscovery apiId="${api.id}" flowRef="patient-prc-api-main"
+                               doc:name="API autodiscovery"
+                               doc:description="Pairs the main flow with its API Manager instance so its policies (Client ID Enforcement) apply"/>
 
     <!-- The only lower API of this application. Location per environment; HTTPS on CloudHub. -->
     <http:request-config name="system-api-request-config"

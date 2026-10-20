@@ -8,6 +8,9 @@
 # - Uses a separate MULE_BASE (default: ./.mule-base, git-ignored), so the runtime
 #   installation itself is never modified.
 # - Reads MULE_SECURE_KEY from infrastructure/.env and passes it as -Dsecure.key.
+# - The runtime is not paired with API Manager (no platform credentials), so the API
+#   gatekeeper is disabled: in its default FLEXIBLE mode it would block the System and
+#   Process APIs (autodiscovery, see global.xml) with 503 until policies are applied.
 # - MULE_EXTRA_OPTS adds JVM system properties, which override the apps' property files,
 #   e.g. MULE_EXTRA_OPTS="-Ddb.url=jdbc:postgresql://localhost:5432/other_db" for a
 #   separate test database.
@@ -64,6 +67,7 @@ exec "${JAVA_HOME:+$JAVA_HOME/bin/}java" \
     -Dmule.home="$home" -Dmule.base="$base" \
     -Djava.net.preferIPv4Stack=TRUE -Dfile.encoding=UTF-8 \
     -Danypoint.platform.analytics_enabled=false \
+    -Danypoint.platform.gatekeeper=disabled \
     -Dmule.bootstrap.container.wrapper.class=org.mule.runtime.module.boot.internal.MuleContainerBasicWrapper \
     -Denv=local -Dsecure.key="$MULE_SECURE_KEY" \
     "${extra[@]}" \

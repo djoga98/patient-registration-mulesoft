@@ -8,3 +8,6 @@ http:
 systemApi:
   protocol: "HTTPS"
   port: "443"
+# api.id, systemApi.clientId and systemApi.clientSecret (secure) are deployment
+# properties: the API Manager instance ID and this app's client application for the
+# System API (docs/api-manager.md). Empty client ID: no credentials are sent.

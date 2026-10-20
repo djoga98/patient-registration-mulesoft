@@ -4,10 +4,11 @@ Source of truth: *Take-Home Assignment - Patient Registration APIs (MuleSoft)* (
 Each row is one requirement from the PDF. A status is only "Complete and verified"
 when there is executed evidence. Evidence as of 2026-10-19:
 
-- **MUnit**: `mvn clean verify` at the repository root; 78 tests, 0 failures, 100%
-  application coverage in each app.
+- **MUnit**: `mvn clean verify` at the repository root; 107 tests (79 API-level, 28
+  DataWeave), 0 failures, 100% application coverage in each app.
 - **E2E**: `scripts/e2e-local.sh` against the three apps on a local Mule 4.12.3 runtime
-  and Docker PostgreSQL 16; Newman: 9 requests, 67 assertions, 0 failures.
+  and Docker PostgreSQL 16 (empty database `patients_b3`); Newman: 13 requests (the 9
+  sample cases plus 4 bonus requests), 87 assertions, 0 failures.
 - **Failure modes**: `scripts/e2e-failure-modes.sh`; all checks passed.
 - **DB test**: `scripts/db-integration-test.sh`; 7/7 checks passed.
 
@@ -59,7 +60,7 @@ Statuses: **Complete and verified** · **Implemented but not verified** · **Blo
 | R25 | Retries exhausted → 502 `DOWNSTREAM_ERROR` | `MULE:RETRY_EXHAUSTED` → `DOWNSTREAM_ERROR` | MUnit; live failure modes | Complete and verified | |
 | R26 | Experience reads `X-Correlation-ID` or generates a UUID | `request-context.xml`; `correlationIdGeneratorExpression="#[uuid()]"` | MUnit: given value used; absent → UUID that equals the runtime correlation ID | Complete and verified | |
 | R27 | Same value to Process and System, in the response header, in every error body | Explicit header on each request (`sendCorrelationId="NEVER"`); listener response/error-response headers; `errorBody` | MUnit spies at both hops; Postman checks echo + error body on all 9 cases; E2E: one ID in all three logs | Complete and verified | |
-| R28 | Every log line in all three apps contains it | log4j2 pattern `%X{correlationId}`; MUnit proves MDC value = propagated value | E2E log scan: 0 application lines without an ID; only container startup lines (no event) have none | Complete and verified | |
+| R28 | Every log line in all three apps contains it | JSON log layout field `correlationId` (`%X{correlationId}`) and the same value inside every application event; MUnit proves MDC value = propagated value | E2E log check (`scripts/log-events.js`): every line is JSON, 0 application events without the ID or with a different one; only container startup lines (no event) have none | Complete and verified | |
 | R29 | Log request received, each lower call, response sent (status, duration), every error | `request-context.xml`, client sub-flows, error handler | E2E logs (example trace in the README) | Complete and verified | |
 | R30 | No patient data in logs | No payload logging; `logException="false"`; c3p0 INFO silenced | E2E log scan for all sample names, emails, phones, birth dates: 0 matches | Complete and verified | |
 
@@ -67,7 +68,7 @@ Statuses: **Complete and verified** · **Implemented but not verified** · **Blo
 
 | ID | Requirement (PDF) | Implementation | Verification | Status | Notes |
 |---|---|---|---|---|---|
-| R31 | MUnit runs in `mvn clean verify`; a failing test stops the pipeline | munit-maven-plugin `test` goal in each POM; CI runs `mvn clean verify` | 78 tests pass; deliberately broken assertion → `BUILD FAILURE`, exit 1 | Complete and verified | Coverage gate 90% |
+| R31 | MUnit runs in `mvn clean verify`; a failing test stops the pipeline | munit-maven-plugin `test` goal in each POM; CI runs `mvn clean verify` | 107 tests pass; deliberately broken assertion → `BUILD FAILURE`, exit 1 | Complete and verified | Coverage gate 90% |
 | R32 | No real systems in tests: every lower-API call and DB operation mocked | `mock-when` on `http:request` (by `config-ref`) and on `db:insert`/`db:select` | Tests run with nothing listening on the configured lower ports and an unreachable DB URL | Complete and verified | Real-DB behaviour is tested separately (DB test, E2E) |
 
 ## Platform, repository, CI/CD, deliverables
@@ -82,7 +83,7 @@ Statuses: **Complete and verified** · **Implemented but not verified** · **Blo
 | R38 | On push to main, after tests, deploy to CloudHub 2.0 with the Mule Maven plugin | `deploy` job (`needs: build-test`) | `actionlint` clean | Blocked by external access | Gated by `CLOUDHUB_DEPLOY_ENABLED` |
 | R39 | Connected App ID/secret as GitHub Secrets; secure-properties key a secret | `ANYPOINT_CLIENT_ID/SECRET`, `MULE_SECURE_KEY` → `connectedApp*`, `secureProperties` | Workflow review | Implemented but not verified | |
 | R40 | `settings.xml` created in the workflow for Exchange | `.github/scripts/write-maven-settings.sh` (documented Connected App format) | Generated file accepted by Maven 3.9.15, with and without the EE repository | Implemented but not verified | Exchange authentication itself not testable |
-| R41 | Postman collection with sample cases + environment pointing at CloudHub | `postman/` collection + local + CloudHub environment (URL placeholder) | Collection run locally: 67/67 assertions | Implemented but not verified | Verified locally; CloudHub URL unknown until deployed |
+| R41 | Postman collection with sample cases + environment pointing at CloudHub | `postman/` collection + local + CloudHub environment (URL placeholder) | Collection run locally: 13 requests, 87/87 assertions | Implemented but not verified | Verified locally; CloudHub URL unknown until deployed |
 | R42 | README: architecture, local run, deployment, unfinished work | `README.md`, `docs/deployment.md` | Reviewed against the implementation | Complete and verified | |
 | R43 | Sample cases 1-9 give the expected results | Postman collection / `scripts/e2e-local.sh` | All 9 pass locally, in order, on an empty table | Implemented but not verified | PDF asks for this on CloudHub: blocked |
 | R44 | Deliver GitHub link and CloudHub URLs | - | - | Blocked by external access | |
@@ -91,9 +92,9 @@ Statuses: **Complete and verified** · **Implemented but not verified** · **Blo
 
 | ID | Item | Status | Notes |
 |---|---|---|---|
-| B1 | Search endpoint `GET /api/patients?lastName=` | Not started | Optional |
-| B2 | `Idempotency-Key` on Experience POST with Object Store | Not started | Optional; listed as next step in the README |
-| B3 | Client ID Enforcement on Process and System | Not started | Optional; needs API Manager |
-| B4 | DataWeave mappings in separate `.dwl` modules with their own tests | Complete and verified | 21 DataWeave MUnit tests across the three apps |
+| B1 | Search endpoint `GET /api/patients?lastName=` | Complete and verified | All three layers: Process normalises the term like a registered last name, System matches the stored value exactly (index, max 100, by patient ID). 12 MUnit tests; Postman/E2E cases 10-11 |
+| B2 | `Idempotency-Key` on Experience POST with Object Store | Complete and verified | Persistent Object Store (OSv2 on CloudHub), atomic claim, replay of the stored 201, 409 in progress, 422 other body, key released on error. 8 API + 2 DataWeave MUnit tests on the real store; Postman/E2E cases 12-13 (one row stored). OSv2 on CloudHub not verified |
+| B3 | Client ID Enforcement on Process and System | Implemented but not verified | Autodiscovery in both, credentials sent by their callers (MUnit stub test, fails with a wrong secret), gatekeeper handling verified on the local runtime, deployment wiring. Policy, instances and contracts need API Manager: docs/api-manager.md |
+| B4 | DataWeave mappings in separate `.dwl` modules with their own tests | Complete and verified | 28 DataWeave MUnit tests across the three apps |
 | B5 | Minimum MUnit coverage enforced in the build | Complete and verified | `failBuild` below 90%; all apps at 100% |
-| B6 | Structured JSON logging | Not started | Optional |
+| B6 | Structured JSON logging | Complete and verified | JSON line layout + JSON application events (`dwl/LogEvent.dwl`); E2E: every line of all three logs parses as JSON. CloudHub collection of the format not verified |

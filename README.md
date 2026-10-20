@@ -10,8 +10,15 @@ validate it, normalise it, store it in PostgreSQL and read it back.
 | [`patient-sys-api`](patient-sys-api) | System | The only layer with database access. Stores/reads records, generates the patient ID. No business rules. | 8083 |
 
 **Status.** All must-haves that can be done locally are implemented and verified. The
-three apps build, the 78 MUnit tests pass with 100% coverage in each app, and the nine
-sample cases pass end to end against a real PostgreSQL. CloudHub 2.0 deployment and
+three apps build, the 107 MUnit tests pass with 100% coverage in each app, and the nine
+sample cases pass end to end against a real PostgreSQL.
+
+**Bonus items:**
+- Done and verified locally: search by last name, `Idempotency-Key` (Object Store),
+  DataWeave modules with their own tests, the coverage gate, and structured JSON logging.
+- Client ID Enforcement is implemented in the code; applying the policy needs API Manager
+  ([docs/api-manager.md](docs/api-manager.md)).
+ CloudHub 2.0 deployment and
 the GitHub pipeline are configured and validated locally but **not executed**: no
 Anypoint account or GitHub repository was available. See [Unfinished work](#unfinished-work).
 Requirement-by-requirement evidence: [`docs/requirements-checklist.md`](docs/requirements-checklist.md).
@@ -84,10 +91,10 @@ patient-exp-api/  patient-prc-api/  patient-sys-api/   one Mule app each (Studio
   src/test/munit/        API-level suite + DataWeave module suite
 db/                      schema.sql, grants.sql, tests/constraint-tests.sql
 infrastructure/          docker-compose.yml (PostgreSQL 16), init script, .env.example
-postman/                 collection (9 sample cases) + local / CloudHub environments
+postman/                 collection (9 sample cases + 4 bonus requests) + local / CloudHub environments
 scripts/                 local run, E2E, failure modes, secrets tooling, DB reset
 .github/workflows/       ci-cd.yml (build+test on push/PR, deploy from main)
-docs/                    requirements-checklist.md, deployment.md
+docs/                    requirements-checklist.md, deployment.md, api-manager.md
 pom.xml                  build aggregator only (not a parent): `mvn clean verify` for all
 ```
 
@@ -330,6 +337,29 @@ and `dwl/Idempotency.dwl`.
 - TLS: CloudHub terminates HTTPS. Lower APIs are called over HTTPS on CloudHub, and the
   hosted DB URL uses `sslmode=require`.
 
+### Client ID Enforcement on Process and System (bonus)
+
+Prepared in the code and tested locally; applying the policy needs API Manager. The
+setup steps are in [docs/api-manager.md](docs/api-manager.md).
+- **Pairing.** The Process and System APIs pair with their API Manager instances through
+  `<api-gateway:autodiscovery apiId="${api.id}">`.
+- **Callers send credentials.** Each caller sends its client application's `client_id`
+  / `client_secret` headers (`Downstream::clientCredentialHeaders`), only when they are
+  configured. Their sources: deployment properties, the secret a **secure** one, from
+  GitHub Secrets.
+- **Tested.** An MUnit stub lower API answers 200 only with the expected credentials. The
+  test fails with a wrong secret (checked).
+- **Gatekeeper, observed on the local runtime.** Without an API Manager instance, the
+  default (FLEXIBLE) gatekeeper blocks a paired API with **503**:
+  `API ApiKey{id='0'} is blocked`. So:
+  - local runs disable it;
+  - CloudHub deployments disable it while `SYS_API_ID` / `PRC_API_ID` are empty, and
+    keep it on once the IDs are set.
+
+  Deploying without API Manager therefore works as before.
+- **Policy 401s.** A 401 from a policy means the caller's own credentials are wrong, so it
+  surfaces as 502 `DOWNSTREAM_ERROR` and is not retried.
+
 ## Running locally
 
 Prerequisites: Java 17, Maven 3.9.x (built with 3.9.15), Docker, a Mule 4.9+ EE
@@ -347,12 +377,17 @@ scripts/generate-local-secrets.sh
 # 3. Build and test everything
 mvn clean verify
 
-# 4. Run the three apps on one local runtime (separate MULE_BASE, installation untouched)
+# 4. Run the three apps on one local runtime (separate MULE_BASE, installation untouched;
+#    API gatekeeper disabled because nothing is paired with API Manager locally)
 MULE_HOME=/path/to/mule-enterprise-standalone-4.12.3 scripts/run-mule-local.sh
 
-# 5. End-to-end: nine sample cases + persisted rows + log scan (needs an empty table)
-scripts/reset-local-db.sh          # destructive, asks for confirmation
+# 5. End-to-end: collection (9 sample cases + 4 bonus requests) + persisted rows + JSON
+#    log check. Needs an empty table: reset it (destructive, asks for confirmation) ...
+scripts/reset-local-db.sh
 MULE_HOME=/path/to/mule-enterprise-standalone-4.12.3 scripts/e2e-local.sh
+#    ... or use a separate, empty database without touching the existing one:
+#    MULE_EXTRA_OPTS="-Ddb.url=jdbc:postgresql://localhost:5432/<db>?connectTimeout=5&socketTimeout=30" scripts/run-mule-local.sh
+#    E2E_DB_NAME=<db> MULE_HOME=... scripts/e2e-local.sh
 
 # 6. Live failure modes (database down, System API down) and DB constraint tests
 MULE_HOME=... scripts/e2e-failure-modes.sh PAT-000001
@@ -370,12 +405,12 @@ Environments are selected by `env`: `local` (default), `dev` (CloudHub) and `tes
 this was checked deliberately by breaking one assertion. The build also fails below
 90% application coverage.
 
-| App | API suite | DataWeave suite | Coverage |
+| App | API suites | DataWeave suite | Coverage |
 |---|---|---|---|
-| patient-sys-api | 15 | 5 | 100% |
-| patient-prc-api | 23 | 11 | 100% |
-| patient-exp-api | 19 | 5 | 100% |
-| **Total** | **57** | **21** | **78 tests** |
+| patient-sys-api | 19 | 6 | 100% |
+| patient-prc-api | 28 | 13 | 100% |
+| patient-exp-api | 24 + 8 (Idempotency-Key, real Object Store) | 9 | 100% |
+| **Total** | **79** | **28** | **107 tests** |
 
 The API suites send real HTTP requests to the app's own listener, so APIkit
 validation, routing, status codes, headers and the error handler all execute. Every
@@ -393,7 +428,7 @@ The DataWeave suites use fixed dates, including leap-day and 18/65 boundaries.
 
 What MUnit cannot show (real SQL, the response validator against real HTTP, and real
 outages) is covered by:
-- `scripts/e2e-local.sh`: the 9 cases, 67 assertions;
+- `scripts/e2e-local.sh`: the 9 cases plus 4 bonus requests, 87 assertions;
 - `scripts/e2e-failure-modes.sh`;
 - `db/tests/constraint-tests.sql`.
 
@@ -402,7 +437,8 @@ All passed locally.
 ## Postman
 
 `postman/patient-registration.postman_collection.json` holds the nine sample cases, in
-order, with the PDF's request bodies. It is generated by `scripts/build-postman-collection.js`
+order, with the PDF's request bodies. They are followed by the bonus requests: two
+searches by last name (10-11) and an `Idempotency-Key` registration and its replay (12-13). It is generated by `scripts/build-postman-collection.js`
 so the bodies stay byte-exact. Each request sends a fresh `X-Correlation-ID` and checks
 that it is echoed. Error cases check status, code, body shape and correlation ID. Case 1
 stores the new ID for case 8, and age is checked against today's date. Environments:
@@ -438,6 +474,10 @@ Blocked by external access (not attempted, not claimed):
   credentials (customer Nexus access) to download the EE runtime. That is the most
   likely first CI failure on a trial account.
 - **Deliverable links** (repository URL, CloudHub URLs) don't exist yet.
+- **Client ID Enforcement is not applied.** API instances, the policy, client
+  applications and contracts need API Manager. Whether CloudHub 2.0 supplies the
+  platform credentials for pairing is also unverified (docs/api-manager.md).
+- **Object Store v2 and the JSON log format on CloudHub** are configured but unverified.
 
 Known limitations:
 
@@ -462,8 +502,8 @@ With more time:
   sub-flows.
 - Pass the `Idempotency-Key` down to the System API, and store it with the record, for
   exactly-once registration even when a response is lost between layers.
-- Client ID enforcement on the Process and System APIs (API Manager), and mTLS or
-  private-space ingress for the System API.
+- mTLS or private-space ingress for the System API, so that it is not reachable from the
+  internet at all (Client ID Enforcement only authenticates callers).
 - OpenTelemetry tracing across the hops.
 - A Testcontainers-based integration suite in CI instead of the local scripts.
 - Paging for the search endpoint (`limit`/`offset` or a cursor) instead of the fixed cap

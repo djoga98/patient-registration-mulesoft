@@ -88,6 +88,12 @@ Variables:
 | `CLOUDHUB_RELEASE_CHANNEL` | default `EDGE` (4.12 is an Edge release) |
 | `SYS_API_HOST`, `PRC_API_HOST` | CloudHub hosts, filled in during the first rollout (step 5) |
 | `CLOUDHUB_DEPLOY_ENABLED` | `true` to switch deployment on |
+| `SYS_API_ID`, `PRC_API_ID` | *optional*, API Manager instance IDs for Client ID Enforcement ([api-manager.md](api-manager.md)). Empty: the APIs are deployed unmanaged (placeholder ID, gatekeeper disabled). |
+
+Optional secrets for Client ID Enforcement, only together with the API IDs:
+`SYS_API_CLIENT_ID` / `SYS_API_CLIENT_SECRET` (used by the Process API) and
+`PRC_API_CLIENT_ID` / `PRC_API_CLIENT_SECRET` (used by the Experience API). The Experience
+API also uses Object Store v2 (Idempotency-Key), enabled in its deployment profile.
 
 ### MUnit in CI and the Enterprise repository
 

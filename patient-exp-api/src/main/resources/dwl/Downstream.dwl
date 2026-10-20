@@ -26,3 +26,11 @@ fun errorCodeFor(statusCode: Number, body: Any): String | Null = do {
     else if ((propagatedCodes[statusCode as String] default []) contains code) code
     else "DOWNSTREAM_ERROR"
 }
+
+/**
+ * client_id / client_secret headers for the lower API's Client ID Enforcement policy
+ * (API Manager). None when no client ID is configured: locally and in environments
+ * where the lower API is not managed.
+ */
+fun clientCredentialHeaders(clientId: String | Null, clientSecret: String | Null): Object =
+    if (isBlank(clientId)) {} else { client_id: clientId, client_secret: clientSecret default "" }

@@ -8,6 +8,11 @@ version: v1
 mediaType: application/json
 protocols: [ HTTP, HTTPS ]
 
+securitySchemes:
+  client-id-enforcement: !include security/client-id-enforcement.raml
+
+securedBy: [ client-id-enforcement ]
+
 traits:
   correlated: !include traits/correlated.raml
 

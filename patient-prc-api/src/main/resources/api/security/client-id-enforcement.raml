@@ -1,0 +1,19 @@
+#%RAML 1.0 SecurityScheme
+type: x-client-id-enforcement
+description: |
+  Client ID Enforcement, applied by API Manager (policy on this API's instance; the
+  application pairs with it through API autodiscovery). Callers send the credentials of
+  their client application, which needs an approved contract with this API. The
+  application itself does not check them: where the API is not managed (locally, in
+  tests) the headers are ignored.
+describedBy:
+  headers:
+    client_id:
+      type: string
+      description: Client ID of the calling application.
+    client_secret:
+      type: string
+      description: Client secret of the calling application.
+  responses:
+    401:
+      description: Missing or invalid client credentials (answered by the policy).

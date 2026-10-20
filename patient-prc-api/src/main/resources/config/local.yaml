@@ -5,3 +5,10 @@ systemApi:
   protocol: "HTTP"
   host: "localhost"
   port: "8083"
+  # Client ID Enforcement credentials of this app for the System API; empty: none sent.
+  clientId: ""
+  clientSecret: ""
+
+api:
+  # No API Manager pairing here (no platform credentials); placeholder instance ID.
+  id: "0"
