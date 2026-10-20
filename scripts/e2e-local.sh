@@ -21,7 +21,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 log_dir="${MULE_LOG_DIR:-${MULE_HOME:?set MULE_HOME (or MULE_LOG_DIR)}/logs}"
-psql() { docker exec -i patient-registration-postgres psql -U patient_owner -d patients -At "$@"; }
+# E2E_DB_NAME: the database the System API was started against (default: patients).
+psql() { docker exec -i patient-registration-postgres psql -U patient_owner -d "${E2E_DB_NAME:-patients}" -At "$@"; }
 
 for port in 8081 8082 8083; do
     curl -s -o /dev/null --max-time 5 "http://localhost:$port/api/patients/PAT-000000" \

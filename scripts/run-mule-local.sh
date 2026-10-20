@@ -8,6 +8,9 @@
 # - Uses a separate MULE_BASE (default: ./.mule-base, git-ignored), so the runtime
 #   installation itself is never modified.
 # - Reads MULE_SECURE_KEY from infrastructure/.env and passes it as -Dsecure.key.
+# - MULE_EXTRA_OPTS adds JVM system properties, which override the apps' property files,
+#   e.g. MULE_EXTRA_OPTS="-Ddb.url=jdbc:postgresql://localhost:5432/other_db" for a
+#   separate test database.
 # Stop with Ctrl-C.
 set -euo pipefail
 
@@ -46,6 +49,9 @@ to_native() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else echo 
 home="$(to_native "$MULE_HOME")"
 base="$(to_native "$MULE_BASE")"
 
+extra=()
+[[ -n "${MULE_EXTRA_OPTS:-}" ]] && read -r -a extra <<<"$MULE_EXTRA_OPTS"
+
 opens=()
 for pkg in java.base/java.lang java.base/java.lang.reflect java.base/java.lang.invoke java.sql/java.sql \
            java.naming/javax.naming java.base/jdk.internal.ref java.base/java.nio java.base/sun.nio.ch \
@@ -60,6 +66,7 @@ exec "${JAVA_HOME:+$JAVA_HOME/bin/}java" \
     -Danypoint.platform.analytics_enabled=false \
     -Dmule.bootstrap.container.wrapper.class=org.mule.runtime.module.boot.internal.MuleContainerBasicWrapper \
     -Denv=local -Dsecure.key="$MULE_SECURE_KEY" \
+    "${extra[@]}" \
     "${opens[@]}" \
     -cp "$base/conf" \
     --module-path "$home/lib/boot" \
