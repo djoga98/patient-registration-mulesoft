@@ -101,7 +101,8 @@ jobs:
       SYS_API_CLIENT_SECRET: ${{ secrets.SYS_API_CLIENT_SECRET }}
       PRC_API_CLIENT_ID: ${{ secrets.PRC_API_CLIENT_ID }}
       PRC_API_CLIENT_SECRET: ${{ secrets.PRC_API_CLIENT_SECRET }}
-      VERSION: 1.0.${{ github.run_number }}
+      # Exchange versions are immutable, so a re-run (same run number) needs its own version.
+      VERSION: 1.${{ github.run_number }}.${{ github.run_attempt }}
       CLOUDHUB_ENVIRONMENT: ${{ vars.CLOUDHUB_ENVIRONMENT || 'Sandbox' }}
       CLOUDHUB_TARGET: ${{ vars.CLOUDHUB_TARGET || 'Cloudhub-US-East-2' }}
       CLOUDHUB_MULE_VERSION: ${{ vars.CLOUDHUB_MULE_VERSION || '4.12.5' }}
@@ -149,7 +150,7 @@ jobs:
           MULE_EE_REPO_PASSWORD: ${{ secrets.MULE_EE_REPO_PASSWORD }}
         run: .github/scripts/write-maven-settings.sh .ci-settings.xml
 
-      - name: Set Exchange coordinates (groupId = business group, version = run number)
+      - name: Set Exchange coordinates (groupId = business group, version = run number + attempt)
         run: |
           for app in patient-sys-api patient-prc-api patient-exp-api; do
             .github/scripts/set-exchange-coordinates.sh "$app" "$ANYPOINT_BUSINESS_GROUP_ID" "$VERSION"
