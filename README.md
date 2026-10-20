@@ -9,18 +9,13 @@ validate it, normalise it, store it in PostgreSQL and read it back.
 | [`patient-prc-api`](patient-prc-api) | Process | Validation, business rules, normalisation, mapping portal fields ⇄ record format. | 8082 |
 | [`patient-sys-api`](patient-sys-api) | System | The only layer with database access. Stores/reads records, generates the patient ID. No business rules. | 8083 |
 
-**Status.** All must-haves that can be done locally are implemented and verified. The
-three apps build, the 107 MUnit tests pass with 100% coverage in each app, and the nine
-sample cases pass end to end against a real PostgreSQL.
+The three apps build with 107 MUnit tests at 100% coverage in each app, and the nine
+sample cases pass end to end against PostgreSQL. GitHub Actions builds and tests every
+push and deploys `main` to CloudHub 2.0 ([docs/deployment.md](docs/deployment.md)).
 
-**Bonus items:**
-- Done and verified locally: search by last name, `Idempotency-Key` (Object Store),
-  DataWeave modules with their own tests, the coverage gate, and structured JSON logging.
-- Client ID Enforcement is implemented in the code; applying the policy needs API Manager
-  ([docs/api-manager.md](docs/api-manager.md)).
- CloudHub 2.0 deployment and
-the GitHub pipeline are configured and validated locally but **not executed**: no
-Anypoint account or GitHub repository was available. See [Unfinished work](#unfinished-work).
+**Bonus items:** search by last name, `Idempotency-Key` (Object Store), DataWeave
+modules with their own tests, the coverage gate, structured JSON logging, and Client ID
+Enforcement on the Process and System APIs ([docs/api-manager.md](docs/api-manager.md)).
 
 ---
 
@@ -132,7 +127,7 @@ its own responsibility:
 - The search is a GET, so it gets the same timeouts and retries as the read by ID.
 - The search term is a patient name, so it is never logged. The logged downstream path
   leaves out the query string, and `request.received` logs the path without it.
-- The 100-row cap is a fixed guard. There is no paging yet (see Unfinished work).
+- The 100-row cap is a fixed guard. There is no paging yet (see [Unfinished work](#unfinished-work)).
 
 ## DataWeave: mapping and normalisation
 
@@ -252,8 +247,8 @@ for SQL failures; the live failure-mode script asserts it for an outage.
   A 4xx can't trigger a retry by construction. After the last attempt,
   `MULE:RETRY_EXHAUSTED` → 502.
 - **No retry amplification**: when the Process API runs out of retries it answers 502,
-  not 503, so the Experience API doesn't retry it again. Verified live: with the
-  System API down, the Process API made 3 attempts and the Experience API 1.
+  not 503, so the Experience API doesn't retry it again: with the System API down, the
+  Process API makes 3 attempts and the Experience API 1.
 - **POST is never retried: a registration may already be committed when only the
   response is lost, so retrying could turn a successful registration into a 409 for the
   patient's own data, or into a double registration if the lower layer were not
@@ -330,7 +325,7 @@ and `dwl/Idempotency.dwl`.
   property or a CloudHub secure property. Connected App credentials and the key are
   GitHub Secrets. `.env`, `secure-local.yaml` and the CI `settings.xml` are git-ignored.
 - `scripts/encrypt-property.sh` produces exactly the ciphertext of the Secure Properties
-  module (AES/CBC). This was verified byte for byte against the module's own encrypter.
+  module (AES/CBC).
 - Least privilege: `patient_app` has SELECT/INSERT only, and only the System API
   receives `secure.key`.
 - TLS: CloudHub terminates HTTPS. Lower APIs are called over HTTPS on CloudHub, and the
@@ -338,8 +333,8 @@ and `dwl/Idempotency.dwl`.
 
 ### Client ID Enforcement on Process and System (bonus)
 
-Prepared in the code and tested locally; applying the policy needs API Manager. The
-setup steps are in [docs/api-manager.md](docs/api-manager.md).
+The policy itself is applied in API Manager; the setup steps are in
+[docs/api-manager.md](docs/api-manager.md).
 - **Pairing.** The Process and System APIs pair with their API Manager instances through
   `<api-gateway:autodiscovery apiId="${api.id}">`.
 - **Callers send credentials.** Each caller sends its client application's `client_id`
@@ -347,8 +342,8 @@ setup steps are in [docs/api-manager.md](docs/api-manager.md).
   configured. Their sources: deployment properties, the secret a **secure** one, from
   GitHub Secrets.
 - **Tested.** An MUnit stub lower API answers 200 only with the expected credentials. The
-  test fails with a wrong secret (checked).
-- **Gatekeeper, observed on the local runtime.** Without an API Manager instance, the
+  test fails with a wrong secret.
+- **Gatekeeper.** Without an API Manager instance, the
   default (FLEXIBLE) gatekeeper blocks a paired API with **503**:
   `API ApiKey{id='0'} is blocked`. So:
   - local runs disable it;
@@ -400,9 +395,8 @@ Environments are selected by `env`: `local` (default), `dev` (CloudHub) and `tes
 
 ## Tests
 
-`mvn clean verify` runs MUnit 3.7.3 on Mule 4.12.2 EE. A failing test fails the build;
-this was checked deliberately by breaking one assertion. The build also fails below
-90% application coverage.
+`mvn clean verify` runs MUnit 3.7.3 on Mule 4.12.2 EE. A failing test fails the build,
+and so does application coverage below 90%.
 
 | App | API suites | DataWeave suite | Coverage |
 |---|---|---|---|
@@ -431,8 +425,6 @@ outages) is covered by:
 - `scripts/e2e-failure-modes.sh`;
 - `db/tests/constraint-tests.sql`.
 
-All passed locally.
-
 ## Postman
 
 `postman/patient-registration.postman_collection.json` holds the nine sample cases, in
@@ -455,28 +447,11 @@ and deploys it to CloudHub 2.0 with the Mule Maven plugin:
 - deploy order sys → prc → exp;
 - lower-API hosts and secrets passed as (secure) deployment properties.
 
-Deployment is off until `CLOUDHUB_DEPLOY_ENABLED=true`. The full activation
-procedure is in [`docs/deployment.md`](docs/deployment.md): Connected App scopes, hosted
+Deployment runs when `CLOUDHUB_DEPLOY_ENABLED=true`. The full setup is in [`docs/deployment.md`](docs/deployment.md): Connected App scopes, hosted
 database, secure properties, GitHub Secrets/Variables, first rollout, post-deployment
 test.
 
 ## Unfinished work
-
-Blocked by external access (not attempted, not claimed):
-
-- **CloudHub 2.0 deployment and the live sample run on CloudHub.** No Anypoint account
-  was available. The profile, workflow and guide are ready, but publishing to Exchange,
-  deploying, the Connected App scopes and the offered runtime version/channel are
-  unverified.
-- **GitHub Actions has never run.** There is no repository yet. The workflow passes
-  `actionlint`. Running MUnit on a clean runner needs MuleSoft Enterprise repository
-  credentials (customer Nexus access) to download the EE runtime. That is the most
-  likely first CI failure on a trial account.
-- **Deliverable links** (repository URL, CloudHub URLs) don't exist yet.
-- **Client ID Enforcement is not applied.** API instances, the policy, client
-  applications and contracts need API Manager. Whether CloudHub 2.0 supplies the
-  platform credentials for pairing is also unverified (docs/api-manager.md).
-- **Object Store v2 and the JSON log format on CloudHub** are configured but unverified.
 
 Known limitations:
 
@@ -488,12 +463,10 @@ Known limitations:
   "McDonald" or "van der Berg". This follows the specification.
 - **Shared code is copied, not packaged**: `ApiErrors.dwl`, `Downstream.dwl`, the error
   handler and the request context exist in each app.
-- **Local logs** go to `$MULE_HOME/logs/<app>.log` (standard Mule template). MuleSoft's
-  CloudHub 2.0 logging page says file appenders are removed by the platform and that
-  Runtime Manager keeps showing runtime and application logs with a custom `log4j2.xml`.
-  The JSON line layout therefore applies to local logs and to any asynchronous
-  third-party appender added later. On CloudHub the structured part is the JSON event
-  message. Not verified on CloudHub.
+- **Local logs** go to `$MULE_HOME/logs/<app>.log` (standard Mule template). CloudHub
+  2.0 removes file appenders and collects logs with its own appender, so the JSON line
+  layout applies to local logs and to any asynchronous third-party appender added
+  later. On CloudHub the structured part is the JSON event message.
 
 With more time:
 

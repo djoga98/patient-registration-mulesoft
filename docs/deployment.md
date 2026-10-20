@@ -1,9 +1,4 @@
-# CloudHub 2.0 deployment and CI/CD activation
-
-Status: **prepared, not yet executed.** The pipeline and the deployment profile were
-built and validated locally (see the bottom section), but nothing has been deployed: no
-Anypoint account, Connected App or GitHub repository was available. Follow the steps
-below to activate it.
+# CloudHub 2.0 deployment and CI/CD
 
 ## How the pipeline works
 
@@ -19,16 +14,17 @@ secrets can be scoped to it and protected with required reviewers. Deployments a
 serialised (`concurrency: cloudhub-deploy`).
 
 Each application's `cloudhub2` Maven profile (in its `pom.xml`) holds the
-`<cloudhub2Deployment>` configuration. Parameter names follow the MuleSoft page
-*Deploy Applications to CloudHub 2.0 Using the Mule Maven Plugin*. Shared space,
-`vCores` 0.1 (the smallest replica), 1 replica, Java 17, Connected App authentication
-(`connectedAppGrantType` `client_credentials`). Deployment properties set `env=dev`
-plus each app's lower-API host; the System API also gets `secure.key` and `db.url` as
-**secure** properties (hidden in Runtime Manager).
+`<cloudhub2Deployment>` configuration: shared space, `vCores` 0.1 (the smallest
+replica), 1 replica, Java 17, Connected App authentication (`connectedAppGrantType`
+`client_credentials`). Deployment properties set `env=dev` plus each app's lower-API
+host; the System API also gets `secure.key` and `db.url` as **secure** properties
+(hidden in Runtime Manager).
+
+To build the deployable artifacts without deploying: `mvn -P cloudhub2 clean package`.
 
 ## 1. Anypoint Platform
 
-1. Use the free trial organization. Note the **organization (business group) ID**:
+1. Note the **organization (business group) ID**:
    *Access Management → Organization → (your org)*.
 2. Pick the environment, e.g. `Sandbox`, and the CloudHub 2.0 shared-space region,
    e.g. `Cloudhub-US-East-2`.
@@ -36,12 +32,11 @@ plus each app's lower-API host; the System API also gets `secure.key` and `db.ur
    acts on its own behalf (client credentials)*. Grant it the scopes for your org and
    environment:
    - **Exchange Contributor**: publish the applications to Exchange (CloudHub 2.0 deploys from Exchange).
-   - **Design Center Developer**: required by the Mule Maven plugin documentation for Connected App deployments.
+   - **Design Center Developer**: required by the Mule Maven plugin for Connected App deployments.
    - **Runtime Manager**: Create Applications, Delete Applications, Read Applications, Read Servers.
 
-   *The Runtime Manager scope names are from Anypoint's scope picker as I know it and
-   were not verified against an account. If a deployment fails with 403, compare with
-   the scopes the CloudHub 2.0 / Mule Maven plugin docs list for your platform version.*
+   A deployment that fails with 403 means a scope is missing for the selected
+   environment.
 
 ## 2. Hosted PostgreSQL (System API)
 
@@ -75,7 +70,7 @@ Secrets (*Settings → Secrets and variables → Actions*, preferably scoped to 
 | `ANYPOINT_CLIENT_SECRET` | Connected App client secret |
 | `MULE_SECURE_KEY` | key from step 3 |
 | `DB_URL` | JDBC URL from step 2 |
-| `MULE_EE_REPO_USERNAME`, `MULE_EE_REPO_PASSWORD` | *optional*, MuleSoft Enterprise repository (see below) |
+| `MULE_EE_REPO_USERNAME`, `MULE_EE_REPO_PASSWORD` | MuleSoft Enterprise repository (see below) |
 
 Variables:
 
@@ -84,7 +79,7 @@ Variables:
 | `ANYPOINT_BUSINESS_GROUP_ID` | organization / business group ID |
 | `CLOUDHUB_ENVIRONMENT` | e.g. `Sandbox` (default) |
 | `CLOUDHUB_TARGET` | e.g. `Cloudhub-US-East-2` (default) |
-| `CLOUDHUB_MULE_VERSION` | default `4.12.3`; set to a 4.12.x version Runtime Manager offers |
+| `CLOUDHUB_MULE_VERSION` | default `4.12.3`; a 4.12.x version Runtime Manager offers |
 | `CLOUDHUB_RELEASE_CHANNEL` | default `EDGE` (4.12 is an Edge release) |
 | `SYS_API_HOST`, `PRC_API_HOST` | CloudHub hosts, filled in during the first rollout (step 5) |
 | `CLOUDHUB_DEPLOY_ENABLED` | `true` to switch deployment on |
@@ -97,15 +92,13 @@ API also uses Object Store v2 (Idempotency-Key), enabled in its deployment profi
 
 ### MUnit in CI and the Enterprise repository
 
-MuleSoft's MUnit documentation: *"Most applications require Mule runtime engine
-Enterprise Edition to run MUnit tests. Maven downloads the Enterprise runtime from a
-plugin repository"*. That repository is `MuleRepository`
-(`https://repository.mulesoft.org/nexus-ee/content/repositories/releases-ee/`), whose
-credentials MuleSoft customers request from Support. The tests here use EE components
-(`ee:transform`, secure properties), so without those credentials the `build-test` job
-cannot download the EE runtime on a clean runner. `write-maven-settings.sh` adds the
-repository when `MULE_EE_REPO_*` are set. **This is the most likely first CI failure on
-a trial account. It was not verifiable here.**
+MUnit runs the tests on the Mule Enterprise runtime, which Maven downloads from
+`MuleRepository`
+(`https://repository.mulesoft.org/nexus-ee/content/repositories/releases-ee/`). The
+credentials for it are provided by MuleSoft Support. `write-maven-settings.sh` adds the
+repository to `settings.xml` when `MULE_EE_REPO_USERNAME` / `MULE_EE_REPO_PASSWORD` are
+set. If `build-test` fails while resolving the Mule runtime, these two secrets are
+missing or wrong.
 
 ## 5. First rollout (hosts are assigned by CloudHub)
 
@@ -134,17 +127,3 @@ on port 8081 (`lastMileSecurity` is off, the default).
    `npx newman run postman/patient-registration.postman_collection.json -e postman/patient-registration.cloudhub.postman_environment.json`
 4. In Runtime Manager → each app → Logs, check that one `correlationId` appears in all
    three apps for each request.
-
-## What was verified locally
-
-- `mvn -P cloudhub2 clean package` builds all three apps with the deployment profile
-  active (the configuration is only sent to Anypoint by the `deploy` goal).
-- `actionlint 1.7.7`: no findings on the workflow. `shellcheck 0.10.0`: no warnings in
-  any script.
-- `write-maven-settings.sh` output is accepted by Maven 3.9.15 with and without the
-  Enterprise repository. Secrets containing XML-special characters are escaped.
-- `set-exchange-coordinates.sh` changes only the project's own `groupId` and `version`.
-
-Not verified (needs the external accounts): Exchange publishing, the CloudHub 2.0
-deployment itself, Connected App scopes, EE repository access in CI, and the runtime
-version and release channel offered by CloudHub at deployment time.

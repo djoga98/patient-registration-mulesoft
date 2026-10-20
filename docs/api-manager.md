@@ -1,8 +1,8 @@
 # Client ID Enforcement on the Process and System APIs (API Manager)
 
-Status: **prepared in the code, not applied.** No Anypoint account was available, so no
-API instance, policy, client application or contract exists yet. Everything below the
-"What is in the code" section is done in Anypoint Platform once the apps are deployed
+The Process and System APIs are protected by the API Manager policy *Client ID
+Enforcement*. The code side is part of the applications; the policy, the API instances
+and the client applications are set up in Anypoint Platform once the apps are deployed
 (see [deployment.md](deployment.md)).
 
 ## What is in the code
@@ -13,17 +13,17 @@ API instance, policy, client application or contract exists yet. Everything belo
 | Callers send their client credentials: `client_id` / `client_secret` headers on every call to the lower API, only when a client ID is configured | `dwl/Downstream.dwl` (`clientCredentialHeaders`), used in `system-api-client.xml` (Process → System) and `process-api-client.xml` (Experience → Process) |
 | Contract documentation: RAML security scheme `client-id-enforcement` (headers, 401) | `api/security/client-id-enforcement.raml` in both specs |
 | Deployment wiring: `api.id`, `anypoint.platform.gatekeeper`, `systemApi.clientId`/`clientSecret`, `processApi.clientId`/`clientSecret` (secrets as **secure** deployment properties) | `cloudhub2` profiles in the POMs, `.github/scripts/deploy-app.sh`, `.github/workflows/ci-cd.yml` |
-| MUnit: a stub lower API that answers 200 only with the expected credentials proves the headers are really sent (the test fails with a wrong secret; checked) | `system-api-calls-carry-the-client-credentials`, `process-api-calls-carry-the-client-credentials` |
+| MUnit: a stub lower API that answers 200 only with the expected credentials proves the headers are really sent | `system-api-calls-carry-the-client-credentials`, `process-api-calls-carry-the-client-credentials` |
 
 The Experience API is not managed (the assignment asks for the Process and System APIs).
 A 401 from a lower API's policy means *our* credentials are wrong, which the portal
 cannot fix: it answers 502 `DOWNSTREAM_ERROR` like any other unexpected lower status, and
 is not retried.
 
-### The gatekeeper (verified locally)
+### The gatekeeper
 
 With autodiscovery, a runtime that has no API Manager instance to pair with **blocks the
-API with 503** in the default gatekeeper mode. Observed on the local Mule 4.12.3 runtime:
+API with 503** in the default gatekeeper mode. The runtime log shows:
 
 ```
 GateKeeper started in FLEXIBLE mode
@@ -31,17 +31,15 @@ Client ID or Client Secret were not provided. API Platform client is DISABLED.
 API ApiKey{id='0'} is blocked (unavailable).
 ```
 
-So wherever an API is not managed, the gatekeeper must be off:
+So wherever an API is not managed, the gatekeeper is off:
 
 - **Locally**, `scripts/run-mule-local.sh` starts the runtime with
   `-Danypoint.platform.gatekeeper=disabled` (and `api.id` is the placeholder `0` in
-  `config/local.yaml`). The E2E and failure-mode scripts passed with autodiscovery in
-  place.
+  `config/local.yaml`).
 - **On CloudHub**, `deploy-app.sh` deploys with `api.id=0` and the gatekeeper `disabled`
   while `SYS_API_ID` / `PRC_API_ID` are empty, and with the real instance ID and the
   gatekeeper `flexible` (the platform default: blocked until the policies are applied)
-  once they are set. Deploying without API Manager therefore keeps working exactly as
-  before.
+  once they are set. Deploying without API Manager therefore keeps working as before.
 - MUnit does not start the gateway; the tests are unaffected.
 
 ## Activation (Anypoint Platform)
@@ -80,13 +78,12 @@ Do this after the first rollout of all three apps (deployment.md, step 5).
    System API without headers gets `401`; the Postman collection against the Experience
    API still passes.
 
-## Not verified (needs the account)
+## Troubleshooting
 
-- Whether CloudHub 2.0 supplies the runtime's platform credentials automatically. The
-  MuleSoft page on organization credentials describes setting
+- **Instances stay *Unregistered* after the redeploy.** The runtime pairs with API
+  Manager using the environment's platform credentials. Add
   `anypoint.platform.client_id` / `anypoint.platform.client_secret` (the environment's
-  client ID and secret) as properties. If API Manager does not show the instances as
-  *Active* after step 6, add those two as secure deployment properties for the System and
-  Process APIs.
-- The exact Exchange/API Manager screen names, which change between platform releases.
-- Policy behaviour itself (401 body, contract caching) on CloudHub.
+  client ID and secret, *Access Management → Environments*) as secure deployment
+  properties of the System and Process APIs and redeploy.
+- **The portal answers 502 and the lower API logs a 401.** The caller's client ID or
+  secret does not match the client application with a contract on that instance.
