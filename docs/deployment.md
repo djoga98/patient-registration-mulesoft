@@ -7,7 +7,7 @@
 | Job | Runs on | What it does |
 |---|---|---|
 | `build-test` | every push and pull request (matrix: the three apps) | Java 17, Maven 3.9.15, `mvn clean verify` = build + MUnit + coverage. A failing test fails the job. MUnit/coverage reports are uploaded as artifacts. |
-| `deploy` | push to `main`, after all three `build-test` jobs pass, only when the repository variable `CLOUDHUB_DEPLOY_ENABLED` is `true` | Writes `settings.xml` from secrets, sets each app's `groupId` to the business group ID and its version to `1.<run number>.<run attempt>` (Exchange versions are immutable, so a re-run publishes a new one), then for **sys → prc → exp** runs `mvn -P cloudhub2 clean deploy -DmuleDeploy`: publish to Exchange, then deploy to CloudHub 2.0 with the Mule Maven plugin. |
+| `deploy` | push to `main`, after all three `build-test` jobs pass, only when the repository variable `CLOUDHUB_DEPLOY_ENABLED` is `true` | Writes `settings.xml` from secrets, sets each app's `groupId` to the business group ID and its version to `1.<run number>.<run attempt>` (Exchange versions are immutable, so a re-run publishes a new one), then for **sys → prc → exp** runs `.github/scripts/deploy-app.sh`: `mvn -P cloudhub2 clean deploy` publishes the app to Exchange, the script waits until Exchange serves the new version, and `mvn -P cloudhub2 deploy -DmuleDeploy` deploys it to CloudHub 2.0 with the Mule Maven plugin. |
 
 The `deploy` job runs in the GitHub environment `cloudhub-dev`, so the deployment
 secrets can be scoped to it and protected with required reviewers. Deployments are
