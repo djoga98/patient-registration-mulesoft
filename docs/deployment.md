@@ -61,8 +61,10 @@ To build the deployable artifacts without deploying: `mvn -P cloudhub2 clean pac
 
 ## 4. GitHub configuration
 
-Secrets (*Settings → Secrets and variables → Actions*, preferably scoped to the
-`cloudhub-dev` environment):
+Secrets (*Settings → Secrets and variables → Actions*). `ANYPOINT_CLIENT_ID` /
+`ANYPOINT_CLIENT_SECRET` (and `MULE_EE_REPO_*`) are **repository** secrets, because the
+`build-test` job needs them to resolve dependencies from Exchange. The others are used
+only by the `deploy` job and can be scoped to the `cloudhub-dev` environment.
 
 | Secret | Value |
 |---|---|
