@@ -13,6 +13,15 @@ The three apps build with 107 MUnit tests at 100% coverage in each app, and the 
 sample cases pass end to end against PostgreSQL. GitHub Actions builds and tests every
 push and deploys `main` to CloudHub 2.0 ([docs/deployment.md](docs/deployment.md)).
 
+| Application | CloudHub 2.0 URL (Sandbox, US East 2) |
+|---|---|
+| patient-exp-api | https://patient-exp-api-id14xw.5sc6y6-4.usa-e2.cloudhub.io |
+| patient-prc-api | https://patient-prc-api-id14xw.5sc6y6-4.usa-e2.cloudhub.io |
+| patient-sys-api | https://patient-sys-api-id14xw.5sc6y6-4.usa-e2.cloudhub.io |
+
+The portal entry point is the Experience API, e.g.
+`GET https://patient-exp-api-id14xw.5sc6y6-4.usa-e2.cloudhub.io/api/patients/PAT-000001`.
+
 **Bonus items:** search by last name, `Idempotency-Key` (Object Store), DataWeave
 modules with their own tests, the coverage gate, structured JSON logging, and Client ID
 Enforcement on the Process and System APIs ([docs/api-manager.md](docs/api-manager.md)).
@@ -434,7 +443,7 @@ so the bodies stay byte-exact. Each request sends a fresh `X-Correlation-ID` and
 that it is echoed. Error cases check status, code, body shape and correlation ID. Case 1
 stores the new ID for case 8, and age is checked against today's date. Environments:
 `patient-registration.local…` (`http://localhost:8081`) and `patient-registration.cloudhub…`
-(replace `baseUrl` with the Experience API URL). The cases need an empty patient table.
+(the deployed Experience API). The cases need an empty patient table.
 
 ## CI/CD and CloudHub 2.0
 
