@@ -67,9 +67,11 @@ Do this after the first rollout of all three apps (deployment.md, step 5).
    | Variable | `PRC_API_ID` | API ID of the Process API instance |
    | Secret | `SYS_API_CLIENT_ID`, `SYS_API_CLIENT_SECRET` | client application `patient-prc-api` (it calls the System API) |
    | Secret | `PRC_API_CLIENT_ID`, `PRC_API_CLIENT_SECRET` | client application `patient-exp-api` (it calls the Process API) |
+   | Secret | `ANYPOINT_PLATFORM_CLIENT_ID`, `ANYPOINT_PLATFORM_CLIENT_SECRET` | the **environment's** client ID and secret (*Access Management → Environments → Sandbox*). The System and Process APIs get them as `anypoint.platform.client_id` / `client_secret` (the secret as a secure property) and use them to pair with API Manager and download their policies. |
 
    The workflow refuses to deploy when an API ID is set without the client ID of its
-   caller, which would otherwise lock that caller out.
+   caller, which would otherwise lock that caller out, or without the environment
+   credentials, without which the gatekeeper keeps the API blocked.
 6. **Redeploy** (re-run the workflow on `main`). The order is sys → prc → exp, so for the
    minutes between the System API starting to enforce and the new Process API replica
    taking over, the old Process API calls without credentials and gets 401 (answered as
@@ -80,10 +82,10 @@ Do this after the first rollout of all three apps (deployment.md, step 5).
 
 ## Troubleshooting
 
-- **Instances stay *Unregistered* after the redeploy.** The runtime pairs with API
-  Manager using the environment's platform credentials. Add
-  `anypoint.platform.client_id` / `anypoint.platform.client_secret` (the environment's
-  client ID and secret, *Access Management → Environments*) as secure deployment
-  properties of the System and Process APIs and redeploy.
+- **The new replica never becomes ready and its log shows
+  `API ApiKey{id='…'} is blocked (unavailable)`.** The runtime has no environment
+  credentials, so it cannot download its policies and the gatekeeper keeps the API
+  blocked. Set `ANYPOINT_PLATFORM_CLIENT_ID` / `ANYPOINT_PLATFORM_CLIENT_SECRET` (step 5)
+  and redeploy.
 - **The portal answers 502 and the lower API logs a 401.** The caller's client ID or
   secret does not match the client application with a contract on that instance.

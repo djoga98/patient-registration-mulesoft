@@ -97,6 +97,10 @@ jobs:
       # the client applications the Process / Experience APIs call the layer below with.
       SYS_API_ID: ${{ vars.SYS_API_ID }}
       PRC_API_ID: ${{ vars.PRC_API_ID }}
+      # Environment client ID/secret (Access Management → Environments) the managed
+      # runtimes pair with API Manager with.
+      ANYPOINT_PLATFORM_CLIENT_ID: ${{ secrets.ANYPOINT_PLATFORM_CLIENT_ID }}
+      ANYPOINT_PLATFORM_CLIENT_SECRET: ${{ secrets.ANYPOINT_PLATFORM_CLIENT_SECRET }}
       SYS_API_CLIENT_ID: ${{ secrets.SYS_API_CLIENT_ID }}
       SYS_API_CLIENT_SECRET: ${{ secrets.SYS_API_CLIENT_SECRET }}
       PRC_API_CLIENT_ID: ${{ secrets.PRC_API_CLIENT_ID }}
@@ -137,6 +141,11 @@ jobs:
           fi
           if [ -n "$PRC_API_ID" ] && [ -z "$PRC_API_CLIENT_ID" ]; then
             echo "::error::PRC_API_ID is set but PRC_API_CLIENT_ID is not: patient-exp-api could not call patient-prc-api"; missing=1
+          fi
+          # Without environment credentials a managed runtime cannot fetch its policies,
+          # and the gatekeeper keeps the API blocked.
+          if { [ -n "$SYS_API_ID" ] || [ -n "$PRC_API_ID" ]; } && { [ -z "$ANYPOINT_PLATFORM_CLIENT_ID" ] || [ -z "$ANYPOINT_PLATFORM_CLIENT_SECRET" ]; }; then
+            echo "::error::SYS_API_ID / PRC_API_ID are set but ANYPOINT_PLATFORM_CLIENT_ID / ANYPOINT_PLATFORM_CLIENT_SECRET are not"; missing=1
           fi
           if [ ! -f patient-sys-api/src/main/resources/config/secure-dev.yaml ]; then
             echo "::error::patient-sys-api/src/main/resources/config/secure-dev.yaml is missing (scripts/generate-cloud-secrets.sh)"

@@ -89,7 +89,9 @@ Variables:
 
 Optional secrets for Client ID Enforcement, only together with the API IDs:
 `SYS_API_CLIENT_ID` / `SYS_API_CLIENT_SECRET` (used by the Process API) and
-`PRC_API_CLIENT_ID` / `PRC_API_CLIENT_SECRET` (used by the Experience API). The Experience
+`PRC_API_CLIENT_ID` / `PRC_API_CLIENT_SECRET` (used by the Experience API), plus the
+environment credentials `ANYPOINT_PLATFORM_CLIENT_ID` / `ANYPOINT_PLATFORM_CLIENT_SECRET`
+the managed APIs pair with API Manager with. The Experience
 API also uses Object Store v2 (Idempotency-Key), enabled in its deployment profile.
 
 ### MUnit in CI and the Enterprise repository

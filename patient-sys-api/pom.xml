@@ -201,8 +201,11 @@
                                     <env>${cloudhub.env}</env>
                                     <api.id>${cloudhub.apiId}</api.id>
                                     <anypoint.platform.gatekeeper>${cloudhub.gatekeeper}</anypoint.platform.gatekeeper>
+                                    <!-- Environment credentials the runtime pairs with API Manager with (managed APIs only). -->
+                                    <anypoint.platform.client_id>${env.ANYPOINT_PLATFORM_CLIENT_ID}</anypoint.platform.client_id>
                                 </properties>
                                 <secureProperties>
+                                    <anypoint.platform.client_secret>${env.ANYPOINT_PLATFORM_CLIENT_SECRET}</anypoint.platform.client_secret>
                                     <secure.key>${env.MULE_SECURE_KEY}</secure.key>
                                     <db.url>${env.DB_URL}</db.url>
                                 </secureProperties>
