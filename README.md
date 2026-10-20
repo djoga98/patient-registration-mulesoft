@@ -21,7 +21,6 @@ sample cases pass end to end against a real PostgreSQL.
  CloudHub 2.0 deployment and
 the GitHub pipeline are configured and validated locally but **not executed**: no
 Anypoint account or GitHub repository was available. See [Unfinished work](#unfinished-work).
-Requirement-by-requirement evidence: [`docs/requirements-checklist.md`](docs/requirements-checklist.md).
 
 ---
 
@@ -94,7 +93,7 @@ infrastructure/          docker-compose.yml (PostgreSQL 16), init script, .env.e
 postman/                 collection (9 sample cases + 4 bonus requests) + local / CloudHub environments
 scripts/                 local run, E2E, failure modes, secrets tooling, DB reset
 .github/workflows/       ci-cd.yml (build+test on push/PR, deploy from main)
-docs/                    requirements-checklist.md, deployment.md, api-manager.md
+docs/                    deployment.md, api-manager.md
 pom.xml                  build aggregator only (not a parent): `mvn clean verify` for all
 ```
 
