@@ -138,10 +138,10 @@
             <properties>
                 <cloudhub.environment>Sandbox</cloudhub.environment>
                 <cloudhub.target>Cloudhub-US-East-2</cloudhub.target>
-                <!-- Runtime line 4.12 (LTS channel, Java 17). Override with -Dcloudhub.muleVersion
+                <!-- Runtime line 4.12 (Edge channel, Java 17). Override with -Dcloudhub.muleVersion
                      to a version listed in Runtime Manager if this patch is not offered. -->
                 <cloudhub.muleVersion>4.12.5</cloudhub.muleVersion>
-                <cloudhub.releaseChannel>LTS</cloudhub.releaseChannel>
+                <cloudhub.releaseChannel>EDGE</cloudhub.releaseChannel>
                 <cloudhub.applicationName>${project.artifactId}</cloudhub.applicationName>
                 <cloudhub.env>dev</cloudhub.env>
             </properties>

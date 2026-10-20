@@ -106,7 +106,7 @@ jobs:
       CLOUDHUB_ENVIRONMENT: ${{ vars.CLOUDHUB_ENVIRONMENT || 'Sandbox' }}
       CLOUDHUB_TARGET: ${{ vars.CLOUDHUB_TARGET || 'Cloudhub-US-East-2' }}
       CLOUDHUB_MULE_VERSION: ${{ vars.CLOUDHUB_MULE_VERSION || '4.12.5' }}
-      CLOUDHUB_RELEASE_CHANNEL: ${{ vars.CLOUDHUB_RELEASE_CHANNEL || 'LTS' }}
+      CLOUDHUB_RELEASE_CHANNEL: ${{ vars.CLOUDHUB_RELEASE_CHANNEL || 'EDGE' }}
     steps:
       - uses: actions/checkout@v4
 
