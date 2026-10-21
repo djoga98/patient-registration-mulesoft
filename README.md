@@ -398,7 +398,11 @@ scripts/db-integration-test.sh
 ```
 
 **Anypoint Studio / Code Builder**: import each application folder as a Mule project
-(standard Studio layout). To run inside the IDE, add VM arguments `-Denv=local -Dsecure.key=<your key>`.
+(standard Studio layout). To run all three inside the IDE, select them together in one
+Mule run configuration and add the VM arguments
+`-Denv=local -Dsecure.key=<your key> -Danypoint.platform.gatekeeper=disabled`. The last
+one is needed because the System and Process APIs use API autodiscovery and nothing is
+paired with API Manager locally; without it they answer 503.
 Environments are selected by `env`: `local` (default), `dev` (CloudHub) and `test`
 (MUnit, from `src/test/resources`).
 
