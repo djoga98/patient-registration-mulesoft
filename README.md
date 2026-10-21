@@ -3,58 +3,86 @@
 Three Mule 4 applications, API-led, that take a registration from the patient portal,
 validate it, normalise it, store it in PostgreSQL and read it back.
 
-| Application | Layer | Responsibility | Local port |
+| Layer | Application | Local | CloudHub 2.0 (Sandbox, US East 2) |
 |---|---|---|---|
-| [`patient-exp-api`](patient-exp-api) | Experience | Portal contract. Accepts or creates the correlation ID, adds `channel: PORTAL`, shapes responses (full name, age). | 8081 |
-| [`patient-prc-api`](patient-prc-api) | Process | Validation, business rules, normalisation, mapping portal fields ⇄ record format. | 8082 |
-| [`patient-sys-api`](patient-sys-api) | System | The only layer with database access. Stores/reads records, generates the patient ID. No business rules. | 8083 |
-
-The three apps build with 107 MUnit tests at 100% coverage in each app, and the nine
-sample cases pass end to end against PostgreSQL. GitHub Actions builds and tests every
-push and deploys `main` to CloudHub 2.0 ([docs/deployment.md](docs/deployment.md)).
-
-| Application | CloudHub 2.0 URL (Sandbox, US East 2) |
-|---|---|
-| patient-exp-api | https://patient-exp-api-id14xw.5sc6y6-4.usa-e2.cloudhub.io |
-| patient-prc-api | https://patient-prc-api-id14xw.5sc6y6-4.usa-e2.cloudhub.io |
-| patient-sys-api | https://patient-sys-api-id14xw.5sc6y6-4.usa-e2.cloudhub.io |
+| Experience | [`patient-exp-api`](patient-exp-api) | `:8081` | https://patient-exp-api-id14xw.5sc6y6-4.usa-e2.cloudhub.io |
+| Process | [`patient-prc-api`](patient-prc-api) | `:8082` | https://patient-prc-api-id14xw.5sc6y6-4.usa-e2.cloudhub.io |
+| System | [`patient-sys-api`](patient-sys-api) | `:8083` | https://patient-sys-api-id14xw.5sc6y6-4.usa-e2.cloudhub.io |
 
 The portal entry point is the Experience API, e.g.
 `GET https://patient-exp-api-id14xw.5sc6y6-4.usa-e2.cloudhub.io/api/patients/PAT-000001`.
+The Process and System APIs are protected by Client ID Enforcement and answer 401 to
+direct calls without credentials.
 
-**Bonus items:** search by last name, `Idempotency-Key` (Object Store), DataWeave
-modules with their own tests, the coverage gate, structured JSON logging, and Client ID
-Enforcement on the Process and System APIs ([docs/api-manager.md](docs/api-manager.md)).
+**At a glance**
+
+- 107 MUnit tests, 100% coverage in each app; the nine sample cases pass end to end
+  against PostgreSQL.
+- GitHub Actions builds and tests every push and deploys `main` to CloudHub 2.0
+  ([docs/deployment.md](docs/deployment.md)).
+- Bonus items: search by last name, `Idempotency-Key` (Object Store), DataWeave modules
+  with their own tests, the coverage gate, structured JSON logging, and Client ID
+  Enforcement on the Process and System APIs ([docs/api-manager.md](docs/api-manager.md)).
+
+**Contents:**
+[Architecture](#architecture) ·
+[Contracts](#contracts) ·
+[DataWeave](#dataweave-mapping-and-normalisation) ·
+[Business rules](#business-rules-and-validation) ·
+[Database](#database) ·
+[Error handling](#error-handling) ·
+[Reliability](#reliability) ·
+[Correlation ID and logging](#correlation-id-and-logging) ·
+[Security](#security) ·
+[Running locally](#running-locally) ·
+[Tests](#tests) ·
+[Postman](#postman) ·
+[CI/CD](#cicd-and-cloudhub-20)
 
 ---
 
 ## Architecture
 
 ```mermaid
-flowchart TB
-    portal["Patient portal<br/>(Postman / curl)"]
-    subgraph mule["Mule 4.12 applications"]
-        exp["patient-exp-api<br/>portal contract, correlation ID,<br/>full name + age"]
-        prc["patient-prc-api<br/>validation (400), rules (422),<br/>normalisation, mapping"]
-        sys["patient-sys-api<br/>record store, PAT- ID,<br/>duplicate detection"]
-    end
+flowchart LR
+    portal(["Patient portal<br/>(Postman / curl)"])
+    exp["<b>patient-exp-api</b><br/>Experience"]
+    prc["<b>patient-prc-api</b><br/>Process"]
+    sys["<b>patient-sys-api</b><br/>System"]
     db[("PostgreSQL<br/>table patient")]
-    portal -- "HTTPS JSON<br/>X-Correlation-ID" --> exp
-    exp -- "HTTP(S) JSON + X-Correlation-ID<br/>timeouts, GET retries" --> prc
-    prc -- "HTTP(S) JSON + X-Correlation-ID<br/>timeouts, GET retries" --> sys
-    sys -- "JDBC, parameterised SQL" --> db
+
+    portal -- "HTTPS" --> exp
+    exp -- "HTTPS" --> prc
+    prc -- "HTTPS" --> sys
+    sys -- "JDBC" --> db
 ```
 
-Each API calls only the layer directly below it. Only the System API has a database
-connector; the other two have no database dependency at all.
+| Layer | Responsibility |
+|---|---|
+| **Experience** | The portal contract. Accepts or creates the correlation ID, adds `channel: PORTAL`, shapes the response (full name, age). |
+| **Process** | Validation (400), business rules (422), normalisation, and the mapping between portal fields and the record format. |
+| **System** | The only layer with database access. Stores and reads records, generates the `PAT-` ID, detects duplicates. No business rules. |
+
+Between the layers:
+
+- Each API calls **only the layer directly below it**. Only the System API has a
+  database connector; the other two have no database dependency at all.
+- Every hop is JSON and carries the same `X-Correlation-ID`.
+- Every call has explicit timeouts; GETs are retried on transient failures, POSTs never
+  ([Reliability](#reliability)).
+- On CloudHub, the Process and System APIs accept only callers with a client
+  application ([Client ID Enforcement](#client-id-enforcement-on-process-and-system-bonus)).
 
 **Why API-led here.** The portal format, the business rules and the record format change
-for different reasons and at different speeds. A second channel (kiosk, call centre)
-would reuse the Process API with its own `channel` and never see the database. A
-database change stays behind the System API's record contract. The cost is two extra
-network hops and duplicated error-handling plumbing. The plumbing is kept identical
-across apps (same files, same error catalogue) so it can later move into a shared
-Exchange library.
+for different reasons and at different speeds:
+
+- a second channel (kiosk, call centre) would reuse the Process API with its own
+  `channel` and never see the database;
+- a database change stays behind the System API's record contract.
+
+The cost is two extra network hops and duplicated error-handling plumbing. The plumbing
+is kept identical across apps (same files, same error catalogue) so it can later move
+into a shared Exchange library.
 
 ### One registration end to end
 
@@ -86,27 +114,46 @@ sequenceDiagram
 ### Repository layout
 
 ```text
-patient-exp-api/  patient-prc-api/  patient-sys-api/   one Mule app each (Studio layout)
-  src/main/mule/         <app>.xml (APIkit main + operation flows), global.xml,
-                         error-handler.xml, request-context.xml, <lower>-client.xml
-  src/main/resources/    api/ (RAML + types library + examples), dwl/ (DataWeave modules),
-                         config/ (common + per-environment properties), log4j2.xml
-  src/test/munit/        API-level suite + DataWeave module suite
-db/                      schema.sql, grants.sql, tests/constraint-tests.sql
-infrastructure/          docker-compose.yml (PostgreSQL 16), init script, .env.example
-postman/                 collection (9 sample cases + 4 bonus requests) + local / CloudHub environments
-scripts/                 local run, E2E, failure modes, secrets tooling, DB reset
-.github/workflows/       ci-cd.yml (build+test on push/PR, deploy from main)
-docs/                    deployment.md, api-manager.md
-pom.xml                  build aggregator only (not a parent): `mvn clean verify` for all
+.
+├── patient-exp-api/        Experience API (Mule application)
+├── patient-prc-api/        Process API (Mule application)
+├── patient-sys-api/        System API (Mule application)
+├── db/                     schema.sql, grants.sql, tests/constraint-tests.sql
+├── infrastructure/         docker-compose.yml (PostgreSQL 16), init script, .env.example
+├── postman/                collection + local and CloudHub environments
+├── scripts/                local run, E2E, failure modes, secrets tooling, DB reset
+├── docs/                   deployment.md, api-manager.md
+├── .github/workflows/      ci-cd.yml (build and test on push/PR, deploy from main)
+└── pom.xml                 build aggregator only (not a parent): mvn clean verify for all
 ```
+
+Each application has the standard Studio layout:
+
+```text
+patient-<layer>-api/
+├── src/main/mule/
+│   ├── patient-<layer>-api.xml      APIkit router and operation flows
+│   ├── global.xml                   configurations (HTTP, APIkit, properties; autodiscovery in Process/System)
+│   ├── error-handler.xml            the global error handler
+│   ├── request-context.xml          correlation ID and request/response logging
+│   └── <lower>-client.xml           calls to the layer below (System API: patient-repository.xml)
+├── src/main/resources/
+│   ├── api/                         RAML spec, types library, examples
+│   ├── dwl/                         DataWeave modules
+│   ├── config/                      common.yaml + one file per environment
+│   └── log4j2.xml
+└── src/test/munit/                  API-level suite + DataWeave module suite
+```
+
+The Experience API also has `idempotency.xml` (the `Idempotency-Key` handling).
 
 ## Contracts
 
 Every API has its own RAML 1.0 spec (`src/main/resources/api`) with a types library,
-examples and a shared `correlated` trait, implemented with APIkit. All three expose
-`POST /api/patients` (201 + `Location`) and `GET /api/patients/{patientId}` (200), where
-`patientId` must match `^PAT-[0-9]{6}$`.
+examples and a shared `correlated` trait, implemented with APIkit. All three expose:
+
+- `POST /api/patients` → 201 + `Location`;
+- `GET /api/patients/{patientId}` → 200, where `patientId` must match `^PAT-[0-9]{6}$`.
 
 | Layer | Request | Response |
 |---|---|---|
@@ -184,27 +231,31 @@ Decisions worth knowing:
 ## Database
 
 `db/schema.sql` is idempotent and never drops data. It defines one table, `patient`,
-with a column per record field. `patient_id` defaults to `'PAT-' || lpad(nextval(...), 6, '0')`
-from a sequence capped at 999999, so it can't silently grow a seventh digit.
-`status` defaults to `ACTIVE`, `registered_at` is `timestamptz DEFAULT now()`, `phone`
-is nullable, and CHECK constraints cover the closed code lists and the ID format.
+with a column per record field:
+
+- `patient_id` defaults to `'PAT-' || lpad(nextval(...), 6, '0')` from a sequence capped
+  at 999999, so it can't silently grow a seventh digit;
+- `status` defaults to `ACTIVE`, `registered_at` is `timestamptz DEFAULT now()`;
+- `phone` is nullable;
+- CHECK constraints cover the closed code lists and the ID format.
 
 **Duplicates.** The unique constraint `uq_patient_identity (given_name, family_name, birth_date)`
 is the duplicate check. The insert is
 `INSERT … ON CONFLICT ON CONSTRAINT uq_patient_identity DO NOTHING`: when the constraint
 rejects the row, zero rows are affected and the System API raises
 `APP:DUPLICATE_PATIENT` → 409. I chose this over catching the exception because:
+
 - it names exactly one constraint, so no other SQL failure can be mistaken for a duplicate;
 - it does not depend on driver messages or SQLSTATE parsing;
 - it is race-free under concurrent registrations.
 
 Because names are normalised before storing, case 4 (`"ANA kovač"`) collides with case 1.
 
-All SQL is static text with named parameters; nothing is concatenated. The runtime role
-`patient_app` can only `SELECT` and `INSERT`. Credentials are AES-encrypted Secure
-Configuration Properties, and the key is supplied at runtime (`-Dsecure.key`, a CloudHub
-secure property). The local secure file is generated and git-ignored; the CloudHub one
-holds ciphertext only.
+**Access.** All SQL is static text with named parameters; nothing is concatenated. The
+runtime role `patient_app` can only `SELECT` and `INSERT`. Credentials are AES-encrypted
+Secure Configuration Properties, and the key is supplied at runtime (`-Dsecure.key`, a
+CloudHub secure property). The local secure file is generated and git-ignored; the
+CloudHub one holds ciphertext only.
 
 ## Error handling
 
@@ -214,8 +265,14 @@ type to a code through `dwl/ApiErrors.dwl`, which is the same file in all three 
 and returns the same body everywhere:
 
 ```json
-{ "error": { "code": "DUPLICATE_PATIENT", "message": "A patient with the same name and date of birth already exists.",
-             "correlationId": "6f1c2a9e-0b7d-4c1e-9a52-3c4d5e6f7a8b", "timestamp": "2026-10-15T10:21:07Z" } }
+{
+  "error": {
+    "code": "DUPLICATE_PATIENT",
+    "message": "A patient with the same name and date of birth already exists.",
+    "correlationId": "6f1c2a9e-0b7d-4c1e-9a52-3c4d5e6f7a8b",
+    "timestamp": "2026-10-15T10:21:07Z"
+  }
+}
 ```
 
 | Status | Code | Raised by |
@@ -244,7 +301,7 @@ for SQL failures; the live failure-mode script asserts it for an outage.
 
 ## Reliability
 
-- **Timeouts**: every lower-API request has an explicit `responseTimeout` and a TCP
+- **Timeouts.** Every lower-API request has an explicit `responseTimeout` and a TCP
   `connectionTimeout`. Values are budgeted so an upstream timeout never fires while the
   layer below is still retrying: Process → System 5 s, Experience → Process 20 s, which
   is more than the Process worst case of 3 × 5 s + 2 × 0.5 s. Database statements have
@@ -255,13 +312,13 @@ for SQL failures; the live failure-mode script asserts it for an outage.
   possible errors are `HTTP:CONNECTIVITY`, `HTTP:TIMEOUT` and `HTTP:SERVICE_UNAVAILABLE`.
   A 4xx can't trigger a retry by construction. After the last attempt,
   `MULE:RETRY_EXHAUSTED` → 502.
-- **No retry amplification**: when the Process API runs out of retries it answers 502,
+- **No retry amplification.** When the Process API runs out of retries it answers 502,
   not 503, so the Experience API doesn't retry it again: with the System API down, the
   Process API makes 3 attempts and the Experience API 1.
-- **POST is never retried: a registration may already be committed when only the
+- **POST is never retried.** A registration may already be committed when only the
   response is lost, so retrying could turn a successful registration into a 409 for the
   patient's own data, or into a double registration if the lower layer were not
-  idempotent.**
+  idempotent.
 
 ### Idempotency-Key on the Experience POST (bonus)
 
@@ -293,57 +350,72 @@ and `dwl/Idempotency.dwl`.
   `409 DUPLICATE_PATIENT`. End-to-end exactly-once would need the key to reach the
   System API.
 
-- The Experience API takes `X-Correlation-ID` from the caller. When the header is
-  missing, the event's correlation ID is used, generated as a UUID
+## Correlation ID and logging
+
+- **Source.** The Experience API takes `X-Correlation-ID` from the caller. When the
+  header is missing, the event's correlation ID is used, generated as a UUID
   (`correlationIdGeneratorExpression="#[uuid()]"`). The value is stored in
   `vars.correlationId`.
-- Each lower call sends it **explicitly** as `X-Correlation-ID` (`sendCorrelationId="NEVER"`
-  plus an explicit header), and Process/System adopt it the same way. Every response
-  returns it in the header, and every error body contains it.
-- Every log line contains it: the log4j2 layout prints `%X{correlationId}`, which Mule
-  sets per event. The HTTP listener adopts an incoming `X-Correlation-ID` as the event's
+- **Propagation.** Each lower call sends it **explicitly** as `X-Correlation-ID`
+  (`sendCorrelationId="NEVER"` plus an explicit header), and Process/System adopt it the
+  same way. Every response returns it in the header, and every error body contains it.
+- **In every log line.** The log4j2 layout prints `%X{correlationId}`, which Mule sets
+  per event. The HTTP listener adopts an incoming `X-Correlation-ID` as the event's
   correlation ID. MUnit asserts that `correlationId == vars.correlationId` in all three
   apps, so the logged value and the propagated value are provably the same.
-- **Structured JSON logging.** Each line is one JSON object (`timestamp`, `level`,
-  `logger`, `thread`, `app`, `correlationId`, `message`, and `exception` when there is
-  one), written by a log4j2 `PatternLayout` with `%enc{…}{JSON}` escaping. That needs no
-  extra library and behaves the same on every Mule 4 runtime. Application messages are
-  JSON events themselves, built by `dwl/LogEvent.dwl`:
-  ```json
-  {"timestamp":"2026-10-19T19:47:10.460+02:00","level":"INFO","logger":"com.acme.patient.prc","thread":"…","app":"patient-prc-api","correlationId":"ab7d6be4-…","message":"{\"event\": \"downstream.response\",\"correlationId\": \"ab7d6be4-…\",\"target\": \"system-api\",\"status\": 201,\"durationMs\": 65}"}
-  ```
-  The message is structured, not just the layout, because CloudHub 2.0 removes file
-  appenders and collects logs with its own appender. The message is what reaches
-  Runtime Manager unchanged, so the event fields and the correlation ID survive there.
-- Events per request: `request.received` (method, path), `downstream.request` (target,
-  method, path), `downstream.response` (target, status, durationMs), `response.sent`
-  (status, durationMs, and on errors `code` plus the Mule `errorType`; WARN for 4xx,
-  ERROR for 5xx). The System API also logs `patient.stored` (patientId).
-  `node scripts/log-events.js check <log>` validates a log file and
-  `… count <log> <correlationId> <event> [field=value]` queries it; the E2E scripts use both.
-- **No patient data in logs.** No payloads or fields are logged, only patient IDs.
-  Exception logging is off in the error handler (`logException="false"`), because
-  driver messages quote the rejected values: PostgreSQL's
-  `Key (given_name, family_name, birth_date)=(Ana, Kovač, 1985-04-12)`. c3p0's INFO
-  line that prints the JDBC URL and DB user is silenced. `scripts/e2e-local.sh` scans
-  all three logs for the sample patients' data after a run (0 matches).
+
+### Structured JSON logging (bonus)
+
+Each line is one JSON object (`timestamp`, `level`, `logger`, `thread`, `app`,
+`correlationId`, `message`, and `exception` when there is one), written by a log4j2
+`PatternLayout` with `%enc{…}{JSON}` escaping. That needs no extra library and behaves
+the same on every Mule 4 runtime. Application messages are JSON events themselves, built
+by `dwl/LogEvent.dwl`:
+
+```json
+{"timestamp":"2026-10-19T19:47:10.460+02:00","level":"INFO","logger":"com.acme.patient.prc","thread":"…","app":"patient-prc-api","correlationId":"ab7d6be4-…","message":"{\"event\": \"downstream.response\",\"correlationId\": \"ab7d6be4-…\",\"target\": \"system-api\",\"status\": 201,\"durationMs\": 65}"}
+```
+
+The message is structured, not just the layout, because CloudHub 2.0 removes file
+appenders and collects logs with its own appender. The message is what reaches Runtime
+Manager unchanged, so the event fields and the correlation ID survive there.
+
+| Event | Fields |
+|---|---|
+| `request.received` | method, path |
+| `downstream.request` | target, method, path |
+| `downstream.response` | target, status, durationMs |
+| `response.sent` | status, durationMs; on errors also `code` and the Mule `errorType` (WARN for 4xx, ERROR for 5xx) |
+| `patient.stored` | patientId (System API only) |
+
+`node scripts/log-events.js check <log>` validates a log file and
+`… count <log> <correlationId> <event> [field=value]` queries it; the E2E scripts use both.
+
+**No patient data in logs.** No payloads or fields are logged, only patient IDs.
+Exception logging is off in the error handler (`logException="false"`), because driver
+messages quote the rejected values: PostgreSQL's
+`Key (given_name, family_name, birth_date)=(Ana, Kovač, 1985-04-12)`. c3p0's INFO line
+that prints the JDBC URL and DB user is silenced. `scripts/e2e-local.sh` scans all three
+logs for the sample patients' data after a run (0 matches).
 
 ## Security
 
-- Secrets: DB credentials in encrypted secure properties. The key comes from a system
-  property or a CloudHub secure property. Connected App credentials and the key are
-  GitHub Secrets. `.env`, `secure-local.yaml` and the CI `settings.xml` are git-ignored.
-- `scripts/encrypt-property.sh` produces exactly the ciphertext of the Secure Properties
-  module (AES/CBC).
-- Least privilege: `patient_app` has SELECT/INSERT only, and only the System API
+- **Secrets.** DB credentials are in encrypted secure properties. The key comes from a
+  system property or a CloudHub secure property. Connected App credentials and the key
+  are GitHub Secrets. `.env`, `secure-local.yaml` and the CI `settings.xml` are
+  git-ignored.
+- **Encryption tooling.** `scripts/encrypt-property.sh` produces exactly the ciphertext of
+  the Secure Properties module (AES/CBC).
+- **Least privilege.** `patient_app` has SELECT/INSERT only, and only the System API
   receives `secure.key`.
-- TLS: CloudHub terminates HTTPS. Lower APIs are called over HTTPS on CloudHub, and the
-  hosted DB URL uses `sslmode=require`.
+- **TLS.** CloudHub terminates HTTPS. Lower APIs are called over HTTPS on CloudHub, and
+  the hosted DB URL uses `sslmode=require`.
 
 ### Client ID Enforcement on Process and System (bonus)
 
 The policy itself is applied in API Manager; the setup steps are in
 [docs/api-manager.md](docs/api-manager.md).
+
 - **Pairing.** The Process and System APIs pair with their API Manager instances through
   `<api-gateway:autodiscovery apiId="${api.id}">`.
 - **Callers send credentials.** Each caller sends its client application's `client_id`
@@ -352,14 +424,11 @@ The policy itself is applied in API Manager; the setup steps are in
   GitHub Secrets.
 - **Tested.** An MUnit stub lower API answers 200 only with the expected credentials. The
   test fails with a wrong secret.
-- **Gatekeeper.** Without an API Manager instance, the
-  default (FLEXIBLE) gatekeeper blocks a paired API with **503**:
-  `API ApiKey{id='0'} is blocked`. So:
-  - local runs disable it;
-  - CloudHub deployments disable it while `SYS_API_ID` / `PRC_API_ID` are empty, and
-    keep it on once the IDs are set.
-
-  Deploying without API Manager therefore works as before.
+- **Gatekeeper.** Without an API Manager instance, the default (FLEXIBLE) gatekeeper
+  blocks a paired API with **503**: `API ApiKey{id='0'} is blocked`. So local runs
+  disable it, and CloudHub deployments disable it while `SYS_API_ID` / `PRC_API_ID` are
+  empty and keep it on once the IDs are set. Deploying without API Manager therefore
+  works as before.
 - **Policy 401s.** A 401 from a policy means the caller's own credentials are wrong, so it
   surfaces as 502 `DOWNSTREAM_ERROR` and is not retried.
 
@@ -369,42 +438,68 @@ Prerequisites: Java 17, Maven 3.9.x (built with 3.9.15), Docker, a Mule 4.9+ EE
 standalone runtime (tested with 4.12.3; Anypoint Code Builder installs one under
 `~/AnypointCodeBuilder/runtime`), and Node.js for Newman.
 
+**1. Database**
+
 ```bash
-# 1. Database
-cp infrastructure/.env.example infrastructure/.env      # set POSTGRES_PASSWORD, APP_DB_PASSWORD, MULE_SECURE_KEY (16 chars)
+cp infrastructure/.env.example infrastructure/.env   # set POSTGRES_PASSWORD, APP_DB_PASSWORD, MULE_SECURE_KEY (16 chars)
 docker compose -f infrastructure/docker-compose.yml up -d
+```
 
-# 2. Encrypted local credentials (git-ignored)
+**2. Encrypted local credentials** (git-ignored)
+
+```bash
 scripts/generate-local-secrets.sh
+```
 
-# 3. Build and test everything
+**3. Build and test everything**
+
+```bash
 mvn clean verify
+```
 
-# 4. Run the three apps on one local runtime (separate MULE_BASE, installation untouched;
-#    API gatekeeper disabled because nothing is paired with API Manager locally)
+**4. Run the three apps on one local runtime.** It uses a separate `MULE_BASE`, so the
+runtime installation is untouched, and disables the API gatekeeper because nothing is
+paired with API Manager locally.
+
+```bash
 MULE_HOME=/path/to/mule-enterprise-standalone-4.12.3 scripts/run-mule-local.sh
+```
 
-# 5. End-to-end: collection (9 sample cases + 4 bonus requests) + persisted rows + JSON
-#    log check. Needs an empty table: reset it (destructive, asks for confirmation) ...
+**5. End to end:** the collection (9 sample cases + 4 bonus requests), the persisted rows
+and the JSON log check. It needs an empty table, so either reset it (destructive, asks
+for confirmation):
+
+```bash
 scripts/reset-local-db.sh
 MULE_HOME=/path/to/mule-enterprise-standalone-4.12.3 scripts/e2e-local.sh
-#    ... or use a separate, empty database without touching the existing one:
-#    MULE_EXTRA_OPTS="-Ddb.url=jdbc:postgresql://localhost:5432/<db>?connectTimeout=5&socketTimeout=30" scripts/run-mule-local.sh
-#    E2E_DB_NAME=<db> MULE_HOME=... scripts/e2e-local.sh
+```
 
-# 6. Live failure modes (database down, System API down) and DB constraint tests
+or use a separate, empty database without touching the existing one:
+
+```bash
+MULE_EXTRA_OPTS="-Ddb.url=jdbc:postgresql://localhost:5432/<db>?connectTimeout=5&socketTimeout=30" scripts/run-mule-local.sh
+E2E_DB_NAME=<db> MULE_HOME=... scripts/e2e-local.sh
+```
+
+**6. Live failure modes** (database down, System API down) **and DB constraint tests**
+
+```bash
 MULE_HOME=... scripts/e2e-failure-modes.sh PAT-000001
 scripts/db-integration-test.sh
 ```
 
-**Anypoint Studio / Code Builder**: import each application folder as a Mule project
+**Anypoint Studio / Code Builder.** Import each application folder as a Mule project
 (standard Studio layout). To run all three inside the IDE, select them together in one
-Mule run configuration and add the VM arguments
-`-Denv=local -Dsecure.key=<your key> -Danypoint.platform.gatekeeper=disabled`. The last
-one is needed because the System and Process APIs use API autodiscovery and nothing is
-paired with API Manager locally; without it they answer 503.
-Environments are selected by `env`: `local` (default), `dev` (CloudHub) and `test`
-(MUnit, from `src/test/resources`).
+Mule run configuration and add the VM arguments:
+
+```text
+-Denv=local -Dsecure.key=<your key> -Danypoint.platform.gatekeeper=disabled
+```
+
+The last one is needed because the System and Process APIs use API autodiscovery and
+nothing is paired with API Manager locally; without it they answer 503. Environments are
+selected by `env`: `local` (default), `dev` (CloudHub) and `test` (MUnit, from
+`src/test/resources`).
 
 ## Tests
 
@@ -422,6 +517,7 @@ The API suites send real HTTP requests to the app's own listener, so APIkit
 validation, routing, status codes, headers and the error handler all execute. Every
 lower-API call is mocked by `config-ref`, and every database operation is mocked. The
 suites cover:
+
 - the PDF cases at each layer;
 - validation, business rules and boundary dates (born today is fine, tomorrow is a 422);
 - downstream 400/404/409/422/5xx propagation;
@@ -434,32 +530,43 @@ The DataWeave suites use fixed dates, including leap-day and 18/65 boundaries.
 
 What MUnit cannot show (real SQL, the response validator against real HTTP, and real
 outages) is covered by:
+
 - `scripts/e2e-local.sh`: the 9 cases plus 4 bonus requests, 87 assertions;
 - `scripts/e2e-failure-modes.sh`;
 - `db/tests/constraint-tests.sql`.
 
 ## Postman
 
-`postman/patient-registration.postman_collection.json` holds the nine sample cases, in
-order, with the PDF's request bodies. They are followed by the bonus requests: two
-searches by last name (10-11) and an `Idempotency-Key` registration and its replay (12-13). It is generated by `scripts/build-postman-collection.js`
-so the bodies stay byte-exact. Each request sends a fresh `X-Correlation-ID` and checks
-that it is echoed. Error cases check status, code, body shape and correlation ID. Case 1
-stores the new ID for case 8, and age is checked against today's date. Environments:
-`patient-registration.local…` (`http://localhost:8081`) and `patient-registration.cloudhub…`
-(the deployed Experience API). The cases need an empty patient table.
+`postman/patient-registration.postman_collection.json` runs against the Experience API:
+
+| Requests | What |
+|---|---|
+| 1-9 | the nine sample cases, in order, with the PDF's request bodies |
+| 10-11 | search by last name: one match, no match |
+| 12-13 | an `Idempotency-Key` registration and its replay |
+
+- Every request sends a fresh `X-Correlation-ID` and checks that it is echoed.
+- Error cases check status, code, body shape and correlation ID.
+- Case 1 stores the new ID for case 8, and age is checked against today's date.
+- The collection is generated by `scripts/build-postman-collection.js`, so the bodies stay
+  byte-exact.
+- Environments: `patient-registration.local…` (`http://localhost:8081`) and
+  `patient-registration.cloudhub…` (the deployed Experience API).
+- The cases need an empty patient table.
 
 ## CI/CD and CloudHub 2.0
 
 `.github/workflows/ci-cd.yml` builds and tests the three apps on every push and pull
 request: a matrix job with Java 17 and pinned Maven 3.9.15 that uploads the MUnit
-reports. On a push to `main`, after the tests pass, it publishes each app to Exchange
-and deploys it to CloudHub 2.0 with the Mule Maven plugin:
+reports. Documentation-only changes don't trigger it. On a push to `main`, after the
+tests pass, it publishes each app to Exchange and deploys it to CloudHub 2.0 with the
+Mule Maven plugin:
+
 - shared space, 0.1 vCores, one replica;
 - Connected App `client_credentials`;
 - deploy order sys → prc → exp;
 - lower-API hosts and secrets passed as (secure) deployment properties.
 
-Deployment runs when `CLOUDHUB_DEPLOY_ENABLED=true`. The full setup is in [`docs/deployment.md`](docs/deployment.md): Connected App scopes, hosted
-database, secure properties, GitHub Secrets/Variables, first rollout, post-deployment
-test.
+Deployment runs when `CLOUDHUB_DEPLOY_ENABLED=true`. The full setup is in
+[`docs/deployment.md`](docs/deployment.md): Connected App scopes, hosted database,
+secure properties, GitHub Secrets/Variables, first rollout, post-deployment test.
