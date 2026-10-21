@@ -136,7 +136,7 @@ its own responsibility:
 - The search is a GET, so it gets the same timeouts and retries as the read by ID.
 - The search term is a patient name, so it is never logged. The logged downstream path
   leaves out the query string, and `request.received` logs the path without it.
-- The 100-row cap is a fixed guard. There is no paging yet (see [Unfinished work](#unfinished-work)).
+- The 100-row cap is a fixed guard; there is no paging.
 
 ## DataWeave: mapping and normalisation
 
@@ -167,7 +167,7 @@ Decisions worth knowing:
   isn't judged by UTC's date.
 - **Category is stored at registration**, as the record format requires. GET returns the
   stored value, so a MINOR stays MINOR in the record after turning 18, while the
-  Experience API's `age` is always current. See future work.
+  Experience API's `age` is always current.
 - **Dates from the database** are formatted in SQL (`birth_date`) or read as epoch
   seconds (`registered_at`). No JDBC `Date`/`Timestamp` passes through the JVM time zone,
   the classic off-by-one-day bug.
@@ -463,33 +463,3 @@ and deploys it to CloudHub 2.0 with the Mule Maven plugin:
 Deployment runs when `CLOUDHUB_DEPLOY_ENABLED=true`. The full setup is in [`docs/deployment.md`](docs/deployment.md): Connected App scopes, hosted
 database, secure properties, GitHub Secrets/Variables, first rollout, post-deployment
 test.
-
-## Unfinished work
-
-Known limitations:
-
-- **Category is a registration-time snapshot.** GET does not recompute it.
-- **Unicode normalisation forms**: names are not NFC-normalised. A decomposed `Č`
-  (`C` + combining caron) would not collide with a precomposed one in the duplicate
-  check. Browsers normally send NFC.
-- **The literal name rule** (first letter upper, the rest lower) mangles names like
-  "McDonald" or "van der Berg". This follows the specification.
-- **Shared code is copied, not packaged**: `ApiErrors.dwl`, `Downstream.dwl`, the error
-  handler and the request context exist in each app.
-- **Local logs** go to `$MULE_HOME/logs/<app>.log` (standard Mule template). CloudHub
-  2.0 removes file appenders and collects logs with its own appender, so the JSON line
-  layout applies to local logs and to any asynchronous third-party appender added
-  later. On CloudHub the structured part is the JSON event message.
-
-With more time:
-
-- A shared Exchange library for the common DataWeave modules and the error/logging
-  sub-flows.
-- Pass the `Idempotency-Key` down to the System API, and store it with the record, for
-  exactly-once registration even when a response is lost between layers.
-- mTLS or private-space ingress for the System API, so that it is not reachable from the
-  internet at all (Client ID Enforcement only authenticates callers).
-- OpenTelemetry tracing across the hops.
-- A Testcontainers-based integration suite in CI instead of the local scripts.
-- Paging for the search endpoint (`limit`/`offset` or a cursor) instead of the fixed cap
-  of 100, and prefix or accent-insensitive matching if the portal needs it.

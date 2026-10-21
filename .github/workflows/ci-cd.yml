@@ -4,9 +4,12 @@
 # "true". See docs/deployment.md for the secrets and variables to configure first.
 name: ci-cd
 
+# Documentation-only changes neither build nor redeploy anything.
 on:
   push:
+    paths-ignore: [ '**.md', 'docs/**' ]
   pull_request:
+    paths-ignore: [ '**.md', 'docs/**' ]
   workflow_dispatch:
 
 permissions:
